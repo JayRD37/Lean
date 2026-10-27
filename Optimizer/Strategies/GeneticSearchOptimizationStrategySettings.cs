@@ -1,0 +1,86 @@
+using System;
+using System.Globalization;
+using System.Linq;
+using Newtonsoft.Json;
+using QuantConnect.Genetic;
+
+namespace QuantConnect.Optimizer.Strategies;
+
+/// <summary>Settings for the LEAN optimizer's genetic strategy-discovery adapter.</summary>
+public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStrategySettings
+{
+    [JsonProperty("population-size")] public int PopulationSize { get; set; } = 8;
+    [JsonProperty("generation-count")] public int GenerationCount { get; set; } = 3;
+    [JsonProperty("random-baseline-size")] public int RandomBaselineSize { get; set; } = 4;
+    [JsonProperty("elite-count")] public int EliteCount { get; set; } = 2;
+    [JsonProperty("tournament-size")] public int TournamentSize { get; set; } = 3;
+    [JsonProperty("mutation-rate")] public double MutationRate { get; set; } = 0.15;
+    [JsonProperty("seed")] public int Seed { get; set; } = 1729;
+    [JsonProperty("minimum-trades")] public int MinimumTrades { get; set; } = 5;
+    [JsonProperty("maximum-drawdown")] public double MaximumDrawdown { get; set; } = 0.20;
+    [JsonProperty("allowed-timeframes")] public string AllowedTimeframes { get; set; } = "Daily,Hour";
+    [JsonProperty("symbols")] public string Symbols { get; set; } = "SPY,QQQ,IWM";
+    [JsonProperty("maximum-correlation")] public double MaximumCorrelation { get; set; } = 0.85;
+    [JsonProperty("maximum-portfolio-drawdown")] public double MaximumPortfolioDrawdown { get; set; } = 0.10;
+    [JsonProperty("validation-finalist-count")] public int ValidationFinalistCount { get; set; } = 2;
+    [JsonProperty("validation-baseline-count")] public int ValidationBaselineCount { get; set; } = 2;
+    [JsonProperty("training-start-date")] public string TrainingStartDate { get; set; } = "2018-01-01";
+    [JsonProperty("training-end-date")] public string TrainingEndDate { get; set; } = "2022-12-31";
+    [JsonProperty("validation-start-date")] public string ValidationStartDate { get; set; } = "2023-01-01";
+    [JsonProperty("validation-end-date")] public string ValidationEndDate { get; set; } = "2024-12-31";
+
+    public StrategyDiscoveryOptions ToDiscoveryOptions()
+    {
+        var timeframes = AllowedTimeframes
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => Enum.TryParse<StrategyTimeframe>(value, true, out var parsed)
+                ? parsed
+                : throw new ArgumentException($"Unknown timeframe '{value}'. Allowed values are Minute, Hour, Daily."))
+            .Distinct()
+            .ToArray();
+
+        var options = new StrategyDiscoveryOptions
+        {
+            PopulationSize = PopulationSize,
+            GenerationCount = GenerationCount,
+            RandomBaselineSize = RandomBaselineSize,
+            EliteCount = EliteCount,
+            TournamentSize = TournamentSize,
+            MutationRate = MutationRate,
+            Seed = Seed,
+            MinimumTrades = MinimumTrades,
+            MaximumDrawdown = MaximumDrawdown,
+            AllowedTimeframes = timeframes
+        };
+        options.Validate();
+
+        if (string.IsNullOrWhiteSpace(Symbols) || Symbols.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Length == 0)
+        {
+            throw new ArgumentException("At least one US equity ticker must be configured.", nameof(Symbols));
+        }
+        if (!double.IsFinite(MaximumCorrelation) || MaximumCorrelation is < 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumCorrelation), "MaximumCorrelation must be between zero and one.");
+        }
+        if (!double.IsFinite(MaximumPortfolioDrawdown) || MaximumPortfolioDrawdown is <= 0 or >= 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumPortfolioDrawdown), "MaximumPortfolioDrawdown must be between zero and one.");
+        }
+        if (ValidationFinalistCount < 1) throw new ArgumentOutOfRangeException(nameof(ValidationFinalistCount), "At least one evolved strategy must be validated.");
+        if (ValidationBaselineCount < 0) throw new ArgumentOutOfRangeException(nameof(ValidationBaselineCount), "ValidationBaselineCount cannot be negative.");
+        var trainingStart = DateOnly.ParseExact(TrainingStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var trainingEnd = DateOnly.ParseExact(TrainingEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var validationStart = DateOnly.ParseExact(ValidationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var validationEnd = DateOnly.ParseExact(ValidationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (trainingStart >= trainingEnd || validationStart >= validationEnd || trainingEnd >= validationStart)
+        {
+            throw new ArgumentException("Training dates must be ordered before the disjoint validation date range.");
+        }
+
+        return options;
+    }
+
+    public string SymbolsForParameterSet => string.Join('|', Symbols
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(symbol => symbol.ToUpper(CultureInfo.InvariantCulture)));
+}

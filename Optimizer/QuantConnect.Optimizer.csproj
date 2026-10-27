@@ -40,6 +40,7 @@
     <ProjectReference Include="..\Common\QuantConnect.csproj" />
     <ProjectReference Include="..\Configuration\QuantConnect.Configuration.csproj" />
     <ProjectReference Include="..\Logging\QuantConnect.Logging.csproj" />
+    <ProjectReference Include="..\StrategyDiscovery\QuantConnect.Genetic.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\LICENSE">

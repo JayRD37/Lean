@@ -1,0 +1,44 @@
+{
+  "algorithm-type-name": "GeneticDiscoveryAlgorithm",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "QuantConnect.Algorithm.CSharp.dll",
+  "optimization-launcher": "ConsoleLeanOptimizer",
+  "optimization-strategy": "QuantConnect.Optimizer.Strategies.GeneticSearchOptimizationStrategy",
+  "optimization-strategy-settings": {
+    "$type": "QuantConnect.Optimizer.Strategies.GeneticSearchOptimizationStrategySettings, QuantConnect.Optimizer",
+    "population-size": 8,
+    "generation-count": 3,
+    "random-baseline-size": 4,
+    "elite-count": 2,
+    "tournament-size": 3,
+    "mutation-rate": 0.15,
+    "seed": 1729,
+    "minimum-trades": 10,
+    "maximum-drawdown": 0.20,
+    "allowed-timeframes": "Daily,Hour",
+    "symbols": "SPY,QQQ,IWM,DIA",
+    "maximum-correlation": 0.85,
+    "maximum-portfolio-drawdown": 0.10,
+    "validation-finalist-count": 2,
+    "validation-baseline-count": 2,
+    "training-start-date": "2018-01-01",
+    "training-end-date": "2022-12-31",
+    "validation-start-date": "2023-01-01",
+    "validation-end-date": "2024-12-31"
+  },
+  "optimization-criterion": {
+    "target": "Statistics.Sharpe Ratio",
+    "extremum": "max"
+  },
+  "constraints": [],
+  "parameters": [
+    {
+      "name": "discovery.marker",
+      "value": "1"
+    }
+  ],
+  "maximum-concurrent-backtests": 4,
+  "optimizer-close-automatically": true,
+  "results-destination-folder": "results/genetic-discovery",
+  "lean-binaries-location": "Launcher/bin/Debug/QuantConnect.Lean.Launcher.dll"
+}

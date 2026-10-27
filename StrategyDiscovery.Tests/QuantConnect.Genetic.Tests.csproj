@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AnalysisMode>None</AnalysisMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.9.4" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\StrategyDiscovery\QuantConnect.Genetic.csproj" />
+    <ProjectReference Include="..\Optimizer\QuantConnect.Optimizer.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Tests\StrategyDiscovery\GeneticSearchEngineTests.cs" Link="GeneticSearchEngineTests.cs" />
+    <Compile Include="..\Tests\Optimizer\Strategies\GeneticSearchOptimizationStrategyTests.cs" Link="GeneticSearchOptimizationStrategyTests.cs" />
+  </ItemGroup>
+</Project>

@@ -31,7 +31,8 @@ namespace QuantConnect.Configuration
 
         private static readonly List<CommandLineOption> Options = new List<CommandLineOption>
             {
-                new CommandLineOption("estimate", CommandOptionType.NoValue, "Estimate the optimization run time")
+                new CommandLineOption("estimate", CommandOptionType.NoValue, "Estimate the optimization run time"),
+                new CommandLineOption("config", CommandOptionType.SingleValue, "Path to the optimizer configuration file")
             };
 
         /// <summary>

@@ -51,6 +51,7 @@
     <ProjectReference Include="..\Algorithm\QuantConnect.Algorithm.csproj" />
     <ProjectReference Include="..\Common\QuantConnect.csproj" />
     <ProjectReference Include="..\Indicators\QuantConnect.Indicators.csproj" />
+    <ProjectReference Include="..\StrategyDiscovery\QuantConnect.Genetic.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\LICENSE">
