@@ -27,6 +27,7 @@ public sealed class PortfolioDrawdownGuard
         HighWatermark = Math.Max(initialEquity, state?.HighWatermark ?? 0m);
         IsTripped = state?.Tripped ?? false;
         Update(initialEquity);
+        if (state is null && _stateFile is not null) Persist();
     }
 
     public bool Update(decimal equity)

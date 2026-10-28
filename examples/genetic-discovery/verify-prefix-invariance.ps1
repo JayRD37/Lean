@@ -60,6 +60,7 @@ function Run-Backtest([string] $Name, [string] $EndDate) {
         'discovery.max-negative-review-periods' = '100'
         'discovery.retirement-drawdown' = '0.99'
         'discovery.kill-switch-file' = (Join-Path $runRoot 'never-trigger')
+        'discovery.drawdown-state-file' = (Join-Path $runRoot 'portfolio-drawdown-state.json')
     }
     foreach ($key in $values.Keys) { $params[$key] = [string]$values[$key] }
 
@@ -89,7 +90,11 @@ function Run-Backtest([string] $Name, [string] $EndDate) {
     $resultPath = Join-Path $runRoot 'GeneticDiscoveryAlgorithm.json'
     if (-not (Test-Path -LiteralPath $resultPath)) { throw "No backtest result JSON found under $runRoot. See $logPath" }
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-    return [pscustomobject]@{ Result = $result; ResultPath = $resultPath; LogPath = $logPath }
+    $drawdownPath = Join-Path $runRoot 'portfolio-drawdown-state.json'
+    if (-not (Test-Path -LiteralPath $drawdownPath)) { throw "Persistent drawdown state was not created under $runRoot. See $logPath" }
+    $drawdown = Get-Content -LiteralPath $drawdownPath -Raw | ConvertFrom-Json
+    if ($drawdown.Version -ne 1 -or [decimal]$drawdown.HighWatermark -le 0) { throw "Persistent drawdown state is invalid at $drawdownPath" }
+    return [pscustomobject]@{ Result = $result; ResultPath = $resultPath; LogPath = $logPath; DrawdownPath = $drawdownPath }
 }
 
 function Get-NormalizedOrders($Result, [datetime] $Through) {
@@ -126,4 +131,5 @@ if ($shortJson -cne $longJson) {
 Write-Output "PASS: $($shortOrders.Count) filled orders are identical through $($through.ToString('yyyy-MM-dd'))."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
+Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"

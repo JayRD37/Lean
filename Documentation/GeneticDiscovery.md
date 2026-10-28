@@ -31,7 +31,7 @@ The current interface accepts a non-empty LEAN optimizer `parameters` list for c
 
 ## Look-ahead prefix-invariance check
 
-Run `examples/genetic-discovery/verify-prefix-invariance.ps1` from PowerShell after building the launcher and algorithm. It launches the same fixed SPY genome twice through LEAN's local data reader, once ending 2021-02-15 and once ending 2021-03-31, then compares filled orders through 2021-02-10. The script requires at least one fill and saves both complete runs and launcher logs under `%TEMP%\lean-prefix-invariance` by default. On 2026-10-28, both runs completed and all 150 filled orders through the cutoff matched. This is a causal prefix check for this algorithm/data path; it does not prove general absence of leakage or test point-in-time universe membership.
+Run `examples/genetic-discovery/verify-prefix-invariance.ps1` from PowerShell after building the launcher and algorithm. It launches the same fixed SPY genome twice through LEAN's local data reader, once ending 2021-02-15 and once ending 2021-03-31, then compares filled orders through 2021-02-10 and validates each run's persisted drawdown state. The script requires at least one fill and saves both complete runs and launcher logs under `%TEMP%\lean-prefix-invariance` by default. On 2026-10-28, both runs completed and all 150 filled orders through the cutoff matched. This is a causal prefix check for this algorithm/data path; it does not prove general absence of leakage or test point-in-time universe membership.
 
 ## Local end-to-end discovery smoke run
 

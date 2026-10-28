@@ -206,6 +206,7 @@ public class GeneticSearchEngineTests
         {
             var statePath = Path.Combine(folder, "portfolio-drawdown-state.json");
             var firstProcess = new PortfolioDrawdownGuard(0.10m, 100m, statePath);
+            Assert.That(PortfolioDrawdownGuard.LoadState(statePath)?.HighWatermark, Is.EqualTo(100m));
             Assert.That(firstProcess.Update(120m), Is.False);
             Assert.That(firstProcess.HighWatermark, Is.EqualTo(120m));
 
