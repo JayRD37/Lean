@@ -25,8 +25,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 {
     private const int CorrelationWindow = 60;
     private readonly Dictionary<Symbol, SymbolState> _symbols = new();
-    private readonly HashSet<Symbol> _managedSymbols = new();
-    private readonly HashSet<Symbol> _anchorSymbols = new();
+    private readonly ManagedSymbolRegistry<Symbol> _managedSymbols = new();
     private readonly BrokerageSafetyGate _brokerageSafety = new();
     private StrategyFamily _family;
     private Resolution _resolution;
@@ -114,7 +113,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         foreach (var ticker in symbols)
         {
             var symbol = AddEquity(ticker, _resolution, leverage: 1m).Symbol;
-            _anchorSymbols.Add(symbol);
+            _managedSymbols.AddAnchor(symbol);
             AddSymbolState(symbol, warmUp: false);
         }
         if (_useTopDollarVolumeUniverse)
@@ -154,7 +153,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             _shutdownRequested = true;
             if (!_brokerageSafety.CanLiquidate) return;
             LiquidateManagedPositions("emergency shutdown");
-            if (_managedSymbols.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
+            if (_managedSymbols.Symbols.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
             return;
         }
 
@@ -261,19 +260,19 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     {
         foreach (var security in changes.AddedSecurities)
         {
-            if (_anchorSymbols.Contains(security.Symbol)) continue;
+            if (_managedSymbols.IsAnchor(security.Symbol)) continue;
             AddSymbolState(security.Symbol, warmUp: true);
         }
 
         foreach (var security in changes.RemovedSecurities)
         {
-            if (_anchorSymbols.Contains(security.Symbol)) continue;
+            if (_managedSymbols.IsAnchor(security.Symbol)) continue;
             if (Portfolio[security.Symbol].Invested)
             {
                 Liquidate(security.Symbol, tag: "point-in-time universe removal");
             }
             _symbols.Remove(security.Symbol);
-            if (!Portfolio[security.Symbol].Invested) _managedSymbols.Remove(security.Symbol);
+            _managedSymbols.RemoveUniverseMember(security.Symbol, Portfolio[security.Symbol].Invested);
         }
     }
 
@@ -292,6 +291,10 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnOrderEvent(OrderEvent orderEvent)
     {
+        if (orderEvent.Status is OrderStatus.Filled or OrderStatus.PartiallyFilled)
+        {
+            _managedSymbols.OnPositionStateChanged(orderEvent.Symbol, Portfolio[orderEvent.Symbol].Invested);
+        }
         if (orderEvent.Status != OrderStatus.Invalid) return;
 
         var reason = $"Order {orderEvent.OrderId} for {orderEvent.Symbol} was invalid: {orderEvent.Message}";
@@ -336,7 +339,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     private void LiquidateManagedPositions(string tag)
     {
-        foreach (var symbol in _managedSymbols)
+        foreach (var symbol in _managedSymbols.Symbols)
         {
             if (Portfolio[symbol].Invested) Liquidate(symbol, tag: tag);
         }
@@ -354,7 +357,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
                 STD(symbol, _slowPeriod, confirmationResolution));
         }
         _symbols.Add(symbol, state);
-        _managedSymbols.Add(symbol);
+        _managedSymbols.AddUniverseMember(symbol);
         if (!warmUp) return;
 
         WarmUpIndicator(symbol, state.Fast, _resolution);
@@ -376,7 +379,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     {
         var records = coarse.ToArray();
         var selected = records
-            .Where(item => item.Price >= 5m && item.DollarVolume >= 25_000_000d && !_anchorSymbols.Contains(item.Symbol))
+            .Where(item => item.Price >= 5m && item.DollarVolume >= 25_000_000d && !_managedSymbols.IsAnchor(item.Symbol))
             .OrderByDescending(item => item.DollarVolume)
             .ThenBy(item => item.Symbol.Value, StringComparer.Ordinal)
             .Take(_universeSize)
