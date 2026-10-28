@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $launcherDir = Join-Path $LeanRoot 'Optimizer.Launcher\bin\Debug'
 $launcher = Join-Path $launcherDir 'QuantConnect.Optimizer.Launcher.dll'
 $configSource = Join-Path $LeanRoot 'examples\genetic-discovery\optimizer-smoke.json'
