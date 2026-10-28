@@ -60,12 +60,11 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
         ValidateGenome();
 
-        if (LiveMode &&
-            (!string.Equals(GetParameter("discovery.allow-paper-trading", "false"), "true", StringComparison.OrdinalIgnoreCase) ||
-             !Config.GetBool("alpaca-paper-trading", false)))
-        {
-            throw new InvalidOperationException("Live execution is disabled. Set discovery.allow-paper-trading=true and confirm alpaca-paper-trading=true for an explicitly authorized Alpaca paper account.");
-        }
+        PaperExecutionAuthorization.Validate(
+            LiveMode,
+            string.Equals(GetParameter("discovery.allow-paper-trading", "false"), "true", StringComparison.OrdinalIgnoreCase),
+            Config.GetBool("alpaca-paper-trading", false),
+            Config.Get("live-mode-brokerage", string.Empty));
 
         SetBrokerageModel(BrokerageName.Alpaca, AccountType.Margin);
         AddSecurityInitializer(security => security.SetSlippageModel(new SpreadAndVolumeShareSlippageModel(_minimumSpreadBasisPoints)));
