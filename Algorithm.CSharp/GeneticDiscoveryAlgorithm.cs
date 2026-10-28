@@ -88,7 +88,14 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             Config.Get("live-mode-brokerage", string.Empty));
 
         SetBrokerageModel(BrokerageName.Alpaca, AccountType.Margin);
-        AddSecurityInitializer(security => security.SetSlippageModel(new SpreadAndVolumeShareSlippageModel(_minimumSpreadBasisPoints)));
+        AddSecurityInitializer(security =>
+        {
+            security.SetSlippageModel(new SpreadAndVolumeShareSlippageModel(_minimumSpreadBasisPoints));
+            if (security.Type == SecurityType.Equity && security.Symbol.ID.Market == Market.USA)
+            {
+                security.SetFeeModel(new AlpacaEquityRegulatoryFeeModel());
+            }
+        });
         if (!LiveMode)
         {
             var phase = GetParameter("discovery.phase", "Training");

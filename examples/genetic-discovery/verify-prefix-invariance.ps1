@@ -193,6 +193,10 @@ if ($shortJson -cne $longJson) {
 }
 
 Write-Output "PASS: $($shortOrders.Count) filled orders are identical through $($through.ToString('yyyy-MM-dd'))."
+$estimatedFeesText = $short.Result.Statistics.'Total Fees' -replace '[^0-9.-]', ''
+$estimatedFees = [decimal]::Parse($estimatedFeesText, [Globalization.CultureInfo]::InvariantCulture)
+if ($estimatedFees -le 0) { throw "The Alpaca US equity fee model did not charge regulatory fees in the prefix run. Inspect $($short.LogPath)" }
+Write-Output "PASS: Alpaca equity regulatory fees were included in the LEAN backtest ($($short.Result.Statistics.'Total Fees'))."
 $baselineNetProfit = [double]::Parse(($short.Result.Statistics.'Net Profit' -replace '%', ''), [Globalization.CultureInfo]::InvariantCulture)
 $stressNetProfit = [double]::Parse(($costStress.Result.Statistics.'Net Profit' -replace '%', ''), [Globalization.CultureInfo]::InvariantCulture)
 if ($stressNetProfit -ge $baselineNetProfit) { throw "LEAN's 200 bps full-spread stress did not reduce net profit (baseline=$baselineNetProfit%, stress=$stressNetProfit%). Inspect $($costStress.LogPath)" }
