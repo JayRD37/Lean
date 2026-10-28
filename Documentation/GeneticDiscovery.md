@@ -30,7 +30,7 @@ Pop-Location
 
 `optimizer.json` is a modest search example with three chronological validation windows and four parameter probes per evolved finalist. After walk-forward selection, the optimizer runs exactly one final confirmation backtest on the selected evolved genome; only that result can become `Solution` or qualify for paper promotion. The confirmation range must be later than and disjoint from both training and validation. `optimizer-smoke.json` runs eleven LEAN backtests against the March 2021 SPY data archive, with one validation window, one probe per evolved finalist, and a final untouched March 15–31 confirmation window. Ensure LEAN's matching US equity data is installed before running. Result and LEAN launcher paths are relative to `Optimizer.Launcher/bin/Debug`.
 
-The current interface accepts a non-empty LEAN optimizer `parameters` list for compatibility, while the genetic strategy itself emits genome parameters. The `discovery.marker` static parameter is a required placeholder and is ignored by the algorithm.
+The genetic optimizer is self-starting: it generates its own genome parameter sets and does not require an input `parameters` range. LEAN's other optimization strategies retain the existing non-empty parameter requirement.
 
 To use point-in-time coarse-universe selection, set `universe-mode` to `TopDollarVolume` and `universe-size` to the same value in optimizer settings and paper overlay parameters (`discovery.universe-mode` and `discovery.universe-size`). The checked-in examples default to `Configured`. The local integration fixture uses the 2014 coarse archive; local coarse coverage is sparse, and availability of coarse selection in an Alpaca live-data session has not been verified.
 

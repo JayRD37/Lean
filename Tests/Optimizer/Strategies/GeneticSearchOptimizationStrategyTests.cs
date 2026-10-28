@@ -43,7 +43,7 @@ public class GeneticSearchOptimizationStrategyTests
         strategy.Initialize(
             new Target("Statistics.Sharpe Ratio", new Maximization(), null),
             Array.Empty<Constraint>(),
-            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new HashSet<OptimizationParameter>(),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
@@ -100,7 +100,7 @@ public class GeneticSearchOptimizationStrategyTests
         strategy.Initialize(
             new Target("Statistics.Sharpe Ratio", new Maximization(), null),
             Array.Empty<Constraint>(),
-            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new HashSet<OptimizationParameter>(),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
@@ -155,7 +155,7 @@ public class GeneticSearchOptimizationStrategyTests
         strategy.Initialize(
             new Target("Statistics.Sharpe Ratio", new Maximization(), null),
             Array.Empty<Constraint>(),
-            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new HashSet<OptimizationParameter>(),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
@@ -204,7 +204,7 @@ public class GeneticSearchOptimizationStrategyTests
         strategy.Initialize(
             new Target("Statistics.Sharpe Ratio", new Maximization(), null),
             Array.Empty<Constraint>(),
-            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new HashSet<OptimizationParameter>(),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
@@ -236,7 +236,7 @@ public class GeneticSearchOptimizationStrategyTests
         strategy.Initialize(
             new Target("Statistics.Sharpe Ratio", new Maximization(), null),
             Array.Empty<Constraint>(),
-            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new HashSet<OptimizationParameter>(),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
@@ -277,7 +277,7 @@ public class GeneticSearchOptimizationStrategyTests
             strategy.Initialize(
                 new Target("Statistics.Sharpe Ratio", new Maximization(), null),
                 Array.Empty<Constraint>(),
-                new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+                new HashSet<OptimizationParameter>(),
                 new GeneticSearchOptimizationStrategySettings
                 {
                     PopulationSize = 2,

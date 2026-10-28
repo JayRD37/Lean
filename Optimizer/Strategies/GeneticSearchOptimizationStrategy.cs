@@ -17,7 +17,7 @@ namespace QuantConnect.Optimizer.Strategies;
 /// Evolves strategy genomes and delegates each evaluation to LEAN's existing isolated backtest runner.
 /// Growth and consistency populations advance in batches; a random population is retained as a baseline.
 /// </summary>
-public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
+public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategySelfStarting
 {
     private static readonly object HistoryFileLock = new();
     private readonly object _gate = new();
@@ -48,7 +48,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
     {
         if (_initialized) throw new InvalidOperationException("GeneticSearchOptimizationStrategy cannot be reinitialized.");
         if (target is null || string.IsNullOrWhiteSpace(target.Target)) throw new ArgumentException("An optimization target is required.", nameof(target));
-        if (parameters is null || parameters.Count == 0) throw new ArgumentException("LEAN requires at least one optimization parameter.", nameof(parameters));
+        ArgumentNullException.ThrowIfNull(parameters);
 
         _settings = settings as GeneticSearchOptimizationStrategySettings
             ?? throw new ArgumentException($"Settings must be {nameof(GeneticSearchOptimizationStrategySettings)}.", nameof(settings));

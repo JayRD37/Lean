@@ -39,12 +39,6 @@
     "extremum": "max"
   },
   "constraints": [],
-  "parameters": [
-    {
-      "name": "discovery.marker",
-      "value": "1"
-    }
-  ],
   "maximum-concurrent-backtests": 2,
   "optimizer-close-automatically": true,
   "results-destination-folder": "results/genetic-discovery-smoke-run",

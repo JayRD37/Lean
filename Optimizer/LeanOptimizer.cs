@@ -102,11 +102,6 @@ namespace QuantConnect.Optimizer
         /// <param name="nodePacket">The optimization node packet to handle</param>
         protected LeanOptimizer(OptimizationNodePacket nodePacket)
         {
-            if (nodePacket.OptimizationParameters.IsNullOrEmpty())
-            {
-                throw new ArgumentException("Cannot start an optimization job with no parameter to optimize");
-            }
-
             if (string.IsNullOrEmpty(nodePacket.Criterion?.Target))
             {
                 throw new ArgumentException("Cannot start an optimization job with no target to optimize");
@@ -121,6 +116,11 @@ namespace QuantConnect.Optimizer
             };
 
             Strategy = (IOptimizationStrategy)Activator.CreateInstance(Type.GetType(NodePacket.OptimizationStrategy));
+
+            if (nodePacket.OptimizationParameters.IsNullOrEmpty() && Strategy is not IOptimizationStrategySelfStarting)
+            {
+                throw new ArgumentException("Cannot start an optimization job with no parameter to optimize");
+            }
 
             RunningParameterSetForBacktest = new ConcurrentDictionary<string, ParameterSet>();
             PendingParameterSet = new ConcurrentQueue<ParameterSet>();
