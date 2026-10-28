@@ -105,17 +105,21 @@ public class PromotionSelectorTests
             var overlayPath = Path.Combine(directory, "overlay.json");
             File.WriteAllText(basePath, "{\"environment\":\"backtesting\",\"algorithm-type-name\":\"Basic\",\"environments\":{}}");
             File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
+            var resultsDirectory = Path.Combine(directory, "paper-results");
+            Directory.CreateDirectory(resultsDirectory);
             var genome = new StrategyGenome(StrategyFamily.MeanReversion, StrategyTimeframe.Hour, 9, 35, 14, 3, 2, 25)
             {
                 ConfirmationTimeframe = StrategyTimeframe.Daily
             };
             var selected = new PromotedStrategy(genome, 0.5, StrategyPopulation.Consistency, 3);
 
-            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, Path.Combine(directory, "stop"), "paper-key", "paper-secret");
+            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret");
 
             Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca"));
             Assert.That(config["alpaca-paper-trading"]?.Value<bool>(), Is.True);
             Assert.That(config["alpaca-api-key"]?.Value<string>(), Is.EqualTo("paper-key"));
+            Assert.That(config["results-destination-folder"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(resultsDirectory)));
+            Assert.That(config["log-handler"]?.Value<string>(), Is.EqualTo("QuantConnect.Logging.FileLogHandler"));
             Assert.That(config["parameters"]?["discovery.allow-paper-trading"]?.Value<string>(), Is.EqualTo("true"));
             Assert.That(config["parameters"]?["discovery.family"]?.Value<string>(), Is.EqualTo("MeanReversion"));
             Assert.That(config["parameters"]?["discovery.timeframe"]?.Value<string>(), Is.EqualTo("Hour"));
@@ -136,7 +140,7 @@ public class PromotionSelectorTests
         Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
             "missing-base.json", "missing-overlay.json", "GeneticDiscoveryAlgorithm",
             new PromotedStrategy(Genome(10, 40, 12, 4, 3, 30).ToObject<StrategyGenome>()!, 0.5, StrategyPopulation.Growth, 1),
-            "stop", string.Empty, string.Empty));
+            "results", "stop", string.Empty, string.Empty));
     }
 
     [Test]
