@@ -278,7 +278,12 @@ public class SupervisorRecoveryTests
             }
             Assert.That(adoptionObserved, Is.True, "The supervisor did not adopt the verified surviving paper child.");
             cancellation.Cancel();
-            Assert.ThrowsAsync<OperationCanceledException>(async () => await run.WaitAsync(TimeSpan.FromSeconds(15)));
+            try
+            {
+                await run.WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Fail("The supervisor should stop when cancellation is requested.");
+            }
+            catch (OperationCanceledException) { }
 
             Assert.That(adoptedChild.HasExited, Is.True, "The adopted child should exit after the supervisor's emergency-stop request.");
             Assert.That(File.Exists(killSwitchPath), Is.True, "A shutdown stop marker should remain for operator review.");
