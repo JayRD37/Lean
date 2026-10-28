@@ -139,6 +139,21 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void ParameterNeighborhoodProducesDeterministicDistinctValidNeighbors()
+    {
+        var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 10, 40, 12, 4, 3, 50);
+        var first = genome.CreateParameterNeighborhood(4, [StrategyTimeframe.Daily]);
+        var second = genome.CreateParameterNeighborhood(4, [StrategyTimeframe.Daily]);
+
+        Assert.That(first, Has.Count.EqualTo(4));
+        Assert.That(first, Is.EqualTo(second));
+        Assert.That(first, Does.Not.Contain(genome));
+        Assert.That(first.Distinct().Count(), Is.EqualTo(first.Count));
+        Assert.That(first.All(candidate => candidate.FastPeriod >= StrategyGenome.MinFastPeriod &&
+            candidate.SlowPeriod > candidate.FastPeriod && candidate.ExitThresholdTenths < candidate.EntryThresholdTenths), Is.True);
+    }
+
+    [Test]
     public void WalkForwardWindowsAreChronologicalContiguousAndCoverTheInclusiveRange()
     {
         var start = new DateOnly(2023, 1, 1);

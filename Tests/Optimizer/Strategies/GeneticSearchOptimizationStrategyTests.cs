@@ -34,6 +34,7 @@ public class GeneticSearchOptimizationStrategyTests
                 ValidationFinalistCount = 1,
                 ValidationBaselineCount = 1,
                 ValidationWindowCount = 1,
+                ParameterRobustnessProbeCount = 0,
                 AllowedTimeframes = "Daily"
             });
 
@@ -77,6 +78,7 @@ public class GeneticSearchOptimizationStrategyTests
                 ValidationFinalistCount = 1,
                 ValidationBaselineCount = 1,
                 ValidationWindowCount = 3,
+                ParameterRobustnessProbeCount = 0,
                 AllowedTimeframes = "Daily"
             });
 
@@ -107,6 +109,51 @@ public class GeneticSearchOptimizationStrategyTests
     }
 
     [Test]
+    public void ParameterRobustnessProbesRunBeforeFinalistCanWin()
+    {
+        var strategy = new GeneticSearchOptimizationStrategy();
+        var pending = new Queue<ParameterSet>();
+        strategy.NewParameterSet += (_, parameterSet) => pending.Enqueue(parameterSet);
+        strategy.Initialize(
+            new Target("Statistics.Sharpe Ratio", new Maximization(), null),
+            Array.Empty<Constraint>(),
+            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new GeneticSearchOptimizationStrategySettings
+            {
+                PopulationSize = 2,
+                GenerationCount = 1,
+                RandomBaselineSize = 1,
+                EliteCount = 0,
+                TournamentSize = 1,
+                ValidationFinalistCount = 1,
+                ValidationBaselineCount = 1,
+                ValidationWindowCount = 1,
+                ParameterRobustnessProbeCount = 2,
+                AllowedTimeframes = "Daily"
+            });
+
+        strategy.PushNewResults(OptimizationResult.Initial);
+        for (var index = 0; index < 5; index++)
+        {
+            Assert.That(pending.TryDequeue(out var training), Is.True);
+            strategy.PushNewResults(CreateResult(training!));
+        }
+
+        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(12));
+        Assert.That(pending, Has.Count.EqualTo(7));
+        var firstFinalist = new List<ParameterSet>();
+        for (var index = 0; index < 3; index++)
+        {
+            Assert.That(pending.TryDequeue(out var candidate), Is.True);
+            firstFinalist.Add(candidate!);
+            strategy.PushNewResults(CreateResult(candidate!));
+            if (index < 2) Assert.That(strategy.Solution, Is.Null);
+        }
+        Assert.That(firstFinalist.Select(candidate => candidate.Value["discovery.fast-period"]).Distinct().Count(), Is.GreaterThan(1));
+        Assert.That(strategy.Solution, Is.Not.Null);
+    }
+
+    [Test]
     public void MissingBacktestStatisticsAreRejectedWithoutBreakingTheOptimizationRun()
     {
         var strategy = new GeneticSearchOptimizationStrategy();
@@ -124,6 +171,7 @@ public class GeneticSearchOptimizationStrategyTests
                 EliteCount = 0,
                 TournamentSize = 1,
                 ValidationFinalistCount = 1,
+                ParameterRobustnessProbeCount = 0,
                 AllowedTimeframes = "Daily"
             });
 

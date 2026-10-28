@@ -48,6 +48,31 @@ public sealed record StrategyGenome(
     public double EntryThreshold => EntryThresholdTenths / 10d;
     public double ExitThreshold => ExitThresholdTenths / 10d;
 
+    /// <summary>Creates deterministic one-axis neighbors for parameter sensitivity checks.</summary>
+    public IReadOnlyList<StrategyGenome> CreateParameterNeighborhood(int maximumProbeCount, IReadOnlyList<StrategyTimeframe> allowedTimeframes)
+    {
+        if (maximumProbeCount < 0) throw new ArgumentOutOfRangeException(nameof(maximumProbeCount));
+        ArgumentNullException.ThrowIfNull(allowedTimeframes);
+        var candidates = new[]
+        {
+            this with { FastPeriod = FastPeriod - 1 },
+            this with { FastPeriod = FastPeriod + 1 },
+            this with { SlowPeriod = SlowPeriod - 5 },
+            this with { SlowPeriod = SlowPeriod + 5 },
+            this with { EntryThresholdTenths = EntryThresholdTenths - 1 },
+            this with { EntryThresholdTenths = EntryThresholdTenths + 1 },
+            this with { ExitThresholdTenths = ExitThresholdTenths - 1 },
+            this with { ExitThresholdTenths = ExitThresholdTenths + 1 }
+        };
+
+        return candidates
+            .Select(candidate => candidate.Normalize(allowedTimeframes))
+            .Where(candidate => candidate != this)
+            .Distinct()
+            .Take(maximumProbeCount)
+            .ToArray();
+    }
+
     public StrategyGenome Normalize(IReadOnlyList<StrategyTimeframe> allowedTimeframes)
     {
         ArgumentNullException.ThrowIfNull(allowedTimeframes);

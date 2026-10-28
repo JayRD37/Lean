@@ -23,6 +23,7 @@
     "validation-finalist-count": 2,
     "validation-baseline-count": 2,
     "validation-window-count": 3,
+    "parameter-robustness-probe-count": 4,
     "training-start-date": "2018-01-01",
     "training-end-date": "2022-12-31",
     "validation-start-date": "2023-01-01",
