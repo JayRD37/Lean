@@ -162,6 +162,7 @@ $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
+$multiAssetShort = Run-Backtest 'multi-asset-prefix' '2019-01-01' '2021-02-15' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiAsset = Run-Backtest 'multi-asset' '2019-01-01' '2021-03-31' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiShort = Run-Backtest 'multi-prefix' '2020-01-02' '2021-02-15' 'SPY' 'Hour' 'Daily'
 $multiLong = Run-Backtest 'multi-full-history' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
@@ -170,6 +171,8 @@ $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
 $multiShortOrders = @(Get-NormalizedOrders $multiShort.Result $through)
 $multiLongOrders = @(Get-NormalizedOrders $multiLong.Result $through)
+$multiAssetShortOrders = @(Get-NormalizedOrders $multiAssetShort.Result $through)
+$multiAssetLongOrders = @(Get-NormalizedOrders $multiAsset.Result $through)
 $multiAssetSymbols = @((Get-NormalizedOrders $multiAsset.Result ([datetime]'2021-03-31')) | Select-Object -ExpandProperty Symbol -Unique)
 
 if ($shortOrders.Count -eq 0) { throw "Prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($short.LogPath)" }
@@ -187,6 +190,11 @@ $multiLongJson = ConvertTo-Json -InputObject $multiLongOrders -Depth 5 -Compress
 if ($multiShortOrders.Count -eq 0) { throw "Multi-timeframe prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($multiShort.LogPath)" }
 if ($multiShortJson -cne $multiLongJson) { throw "Multi-timeframe prefix/full-history orders differ through $($through.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
 Write-Output "PASS: $($multiShortOrders.Count) hourly/daily-confirmation fills are identical through $($through.ToString('yyyy-MM-dd'))."
+$multiAssetShortJson = ConvertTo-Json -InputObject $multiAssetShortOrders -Depth 5 -Compress
+$multiAssetLongJson = ConvertTo-Json -InputObject $multiAssetLongOrders -Depth 5 -Compress
+if ($multiAssetShortOrders.Count -eq 0) { throw "Multi-asset prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($multiAssetShort.LogPath)" }
+if ($multiAssetShortJson -cne $multiAssetLongJson) { throw "Multi-asset prefix/full-history orders differ through $($through.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
+Write-Output "PASS: $($multiAssetShortOrders.Count) multi-asset fills are identical through $($through.ToString('yyyy-MM-dd'))."
 $selectionAudit = Get-Content -LiteralPath $multiAsset.AlgorithmLogPath | Where-Object { $_ -match 'Portfolio selection audit:' }
 if ($multiAssetSymbols.Count -lt 2) { throw "The multi-asset backtest filled fewer than two configured symbols; inspect $($multiAsset.AlgorithmLogPath)" }
 if ($selectionAudit.Count -eq 0) { throw "No portfolio selection audit records were emitted for the multi-asset run; inspect $($multiAsset.AlgorithmLogPath)" }
