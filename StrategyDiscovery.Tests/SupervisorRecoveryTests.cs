@@ -11,6 +11,35 @@ namespace QuantConnect.Tests.StrategyDiscovery;
 public class SupervisorRecoveryTests
 {
     [Test]
+    public async Task SupervisorCliRequiresExplicitPaperAuthorizationBeforeLoadingConfig()
+    {
+        var supervisorAssembly = Path.Combine(TestContext.CurrentContext.TestDirectory, "QuantConnect.Genetic.Supervisor.dll");
+        Assert.That(File.Exists(supervisorAssembly), Is.True, $"Supervisor assembly was not copied to {TestContext.CurrentContext.TestDirectory}");
+
+        var dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        var startInfo = new ProcessStartInfo(string.IsNullOrWhiteSpace(dotnetHost) ? "dotnet" : dotnetHost)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(supervisorAssembly);
+        startInfo.ArgumentList.Add("--config");
+        startInfo.ArgumentList.Add(Path.Combine(Path.GetTempPath(), $"missing-supervisor-{Guid.NewGuid():N}.json"));
+        startInfo.Environment.Remove("ALGORY_ALPACA_API_KEY");
+        startInfo.Environment.Remove("ALGORY_ALPACA_API_SECRET");
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Unable to start the supervisor CLI authorization test.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.That(process.ExitCode, Is.EqualTo(2));
+        Assert.That(await standardError, Does.Contain("explicit --enable-paper"));
+        Assert.That(await standardOutput, Is.Empty);
+    }
+
+    [Test]
     public void PaperProcessRecoveryGuardBlocksLiveOrphansAndClearsStaleOrReusedProcessIds()
     {
         var folder = Path.Combine(Path.GetTempPath(), "lean-paper-recovery-" + Guid.NewGuid().ToString("N"));
