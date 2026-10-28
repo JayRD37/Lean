@@ -48,6 +48,29 @@ public sealed class SelfStartingOptimizerContractTests
             parameterSet.Value["discovery.phase"] == "Training"), Is.True);
         Assert.That(optimizer.RunningCount, Is.EqualTo(2));
         Assert.That(optimizer.PendingCount, Is.EqualTo(3));
+
+        optimizer.CompleteNextBacktest("""
+            {
+              "statistics": {
+                "Compounding Annual Return": "12.0%",
+                "Sharpe Ratio": "1.2",
+                "Drawdown": "5.0%",
+                "Win Rate": "55.0%",
+                "Total Trades": "20",
+                "Net Profit": "18.0%"
+              },
+              "totalPerformance": {
+                "tradeStatistics": { "totalNumberOfTrades": 20 },
+                "closedTrades": []
+              }
+            }
+            """);
+
+        Assert.That(optimizer.StartedParameterSets, Has.Count.EqualTo(3));
+        Assert.That(optimizer.StartedParameterSets[^1].Value["discovery.phase"], Is.EqualTo("Training"));
+        Assert.That(optimizer.RunningCount, Is.EqualTo(2));
+        Assert.That(optimizer.PendingCount, Is.EqualTo(2));
+        Assert.That(optimizer.GetRuntimeStatistics()["Completed"], Is.EqualTo("1"));
     }
 
     [Test]
@@ -74,6 +97,7 @@ public sealed class SelfStartingOptimizerContractTests
     private sealed class OptimizerProbe(OptimizationNodePacket packet) : LeanOptimizer(packet)
     {
         private int _nextBacktestId;
+        private readonly Queue<string> _queuedBacktestIds = new();
 
         public List<ParameterSet> StartedParameterSets { get; } = new();
         public int RunningCount => RunningParameterSetForBacktest.Count;
@@ -82,8 +106,12 @@ public sealed class SelfStartingOptimizerContractTests
         protected override string RunLean(ParameterSet parameterSet, string backtestName)
         {
             StartedParameterSets.Add(parameterSet);
-            return $"backtest-{++_nextBacktestId}";
+            var backtestId = $"backtest-{++_nextBacktestId}";
+            _queuedBacktestIds.Enqueue(backtestId);
+            return backtestId;
         }
+
+        public void CompleteNextBacktest(string result) => NewResult(result, _queuedBacktestIds.Dequeue());
 
         protected override void AbortLean(string backtestId)
         {
@@ -94,4 +122,5 @@ public sealed class SelfStartingOptimizerContractTests
         }
     }
 }
+
 
