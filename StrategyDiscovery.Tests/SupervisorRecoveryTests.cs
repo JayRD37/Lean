@@ -56,6 +56,27 @@ public class SupervisorRecoveryTests
     }
 
     [Test]
+    public void EphemeralPaperCredentialsAreOwnerOnlyOnUnix()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Ignore("Unix permission bits are not available on Windows.");
+
+        var configPath = PaperConfigFactory.WriteEphemeralConfig(new JObject { ["alpaca-api-key"] = "paper-test-key" });
+        try
+        {
+            var ownerOnlyDirectory = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+            var ownerOnlyFile = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            var directoryPermissions = File.GetUnixFileMode(Path.GetDirectoryName(configPath)!);
+            var filePermissions = File.GetUnixFileMode(configPath);
+            var otherUserPermissions = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            Assert.That(directoryPermissions & otherUserPermissions, Is.EqualTo((UnixFileMode)0));
+            Assert.That(filePermissions & otherUserPermissions, Is.EqualTo((UnixFileMode)0));
+            Assert.That(directoryPermissions & ownerOnlyDirectory, Is.EqualTo(ownerOnlyDirectory));
+            Assert.That(filePermissions & ownerOnlyFile, Is.EqualTo(ownerOnlyFile));
+        }
+        finally { PaperConfigFactory.DeleteEphemeralConfig(configPath); }
+    }
+
+    [Test]
     public async Task SupervisorStartupFailsClosedWhenSessionMarkerMatchesALiveProcess()
     {
         var folder = Path.Combine(Path.GetTempPath(), "lean-paper-live-orphan-" + Guid.NewGuid().ToString("N"));

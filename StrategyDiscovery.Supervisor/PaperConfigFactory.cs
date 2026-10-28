@@ -68,8 +68,20 @@ public static class PaperConfigFactory
         var directory = Path.Combine(Path.GetTempPath(), "LeanGeneticPaper", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "config.json");
-        File.WriteAllText(path, config.ToString(Formatting.Indented));
-        return path;
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.WriteAllText(path, config.ToString(Formatting.Indented));
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return path;
+        }
+        catch
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            throw;
+        }
     }
 
     public static void DeleteEphemeralConfig(string path)
