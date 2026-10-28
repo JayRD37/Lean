@@ -1,11 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string] $SupervisorConfig = (Join-Path (Split-Path $PSScriptRoot -Parent) "examples/genetic-discovery/supervisor.json")
+    [string] $SupervisorConfig
 )
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($SupervisorConfig)) {
+    $SupervisorConfig = Join-Path $repositoryRoot "examples/genetic-discovery/supervisor.json"
+}
 $userDotnetRoot = Join-Path $env:USERPROFILE ".dotnet"
 $userDotnet = Join-Path $userDotnetRoot "dotnet.exe"
 $previousDotnetRoot = [Environment]::GetEnvironmentVariable("DOTNET_ROOT", "Process")
@@ -83,5 +86,6 @@ finally {
 }
 
 exit $exitCode
+
 
 
