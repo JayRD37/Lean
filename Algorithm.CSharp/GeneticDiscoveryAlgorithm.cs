@@ -45,6 +45,12 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private StrategyLifecycleMonitor _lifecycleMonitor;
     private StrategyLifecycleOptions _lifecycleOptions;
 
+    /// <summary>True when LEAN may submit new strategy orders.</summary>
+    public bool CanSubmitStrategyOrders => _brokerageSafety.CanSubmitOrders;
+
+    /// <summary>True after an invalid order has latched the execution safety shutdown.</summary>
+    public bool ExecutionSafetyTripped => _brokerageSafety.IsTripped;
+
     public override void Initialize()
     {
         _family = ParseEnum(GetParameter("discovery.family", nameof(StrategyFamily.TrendFollowing)), StrategyFamily.TrendFollowing);

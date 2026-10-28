@@ -16,6 +16,8 @@
     <ProjectReference Include="..\StrategyDiscovery\QuantConnect.Genetic.csproj" />
     <ProjectReference Include="..\Optimizer\QuantConnect.Optimizer.csproj" />
     <ProjectReference Include="..\StrategyDiscovery.Supervisor\QuantConnect.Genetic.Supervisor.csproj" />
+    <ProjectReference Include="..\Algorithm\QuantConnect.Algorithm.csproj" />
+    <ProjectReference Include="..\Algorithm.CSharp\QuantConnect.Algorithm.CSharp.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Tests\StrategyDiscovery\GeneticSearchEngineTests.cs" Link="GeneticSearchEngineTests.cs" />
