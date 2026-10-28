@@ -6,10 +6,22 @@ $keySecure = $null
 $secretSecure = $null
 $keyPointer = [IntPtr]::Zero
 $secretPointer = [IntPtr]::Zero
+$storedCredentials = $null
+$credentialFile = Join-Path $env:LOCALAPPDATA "AlgoryLean/alpaca-paper.credentials.json.dpapi"
 
 try {
-    $keySecure = Read-Host "Alpaca PAPER API key (input hidden)" -AsSecureString
-    $secretSecure = Read-Host "Alpaca PAPER API secret (input hidden)" -AsSecureString
+    if (Test-Path -LiteralPath $credentialFile) {
+        $storedCredentials = Get-Content -LiteralPath $credentialFile -Raw | ConvertFrom-Json
+        if ($storedCredentials.endpoint -ne "https://paper-api.alpaca.markets/v2") {
+            throw "Stored credentials are not configured for the Alpaca paper endpoint."
+        }
+        $keySecure = ConvertTo-SecureString -String $storedCredentials.key
+        $secretSecure = ConvertTo-SecureString -String $storedCredentials.secret
+    }
+    else {
+        $keySecure = Read-Host "Alpaca PAPER API key (input hidden)" -AsSecureString
+        $secretSecure = Read-Host "Alpaca PAPER API secret (input hidden)" -AsSecureString
+    }
     if ($keySecure.Length -eq 0 -or $secretSecure.Length -eq 0) {
         throw "Both paper credentials are required."
     }
@@ -56,6 +68,8 @@ finally {
     if ($secretPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer) }
     if ($null -ne $keySecure) { $keySecure.Dispose() }
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
+    $storedCredentials = $null
     if ($null -ne $headers) { $headers.Clear() }
 }
+
 
