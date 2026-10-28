@@ -151,7 +151,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         foreach (var state in _symbols.Values)
         {
             if (!slice.Bars.TryGetValue(state.Symbol, out TradeBar bar)) continue;
-            state.UpdateReturns((double)bar.Close);
+            state.UpdateReturns(bar.EndTime, (double)bar.Close);
         }
 
         if (IsWarmingUp) return;
@@ -272,7 +272,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (availablePositions <= 0) return selected;
         foreach (var candidate in candidates.OrderByDescending(item => item.Strength).ThenBy(item => item.State.Symbol.Value, StringComparer.Ordinal))
         {
-            if (selected.Any(existing => Math.Abs(Correlation(candidate.State, existing.State)) >= _maximumCorrelation)) continue;
+            if (selected.Any(existing => Correlation(candidate.State, existing.State) is not { } correlation || Math.Abs(correlation) >= _maximumCorrelation)) continue;
             selected.Add(candidate);
             if (selected.Count == availablePositions) break;
         }
@@ -331,37 +331,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         return zScore <= -_exitThreshold;
     }
 
-    private static double Correlation(SymbolState first, SymbolState second)
-    {
-        var count = Math.Min(first.Returns.Count, second.Returns.Count);
-        if (count < 20) return 0;
-
-        var firstMean = 0d;
-        var secondMean = 0d;
-        for (var index = 0; index < count; index++)
-        {
-            firstMean += first.Returns[index];
-            secondMean += second.Returns[index];
-        }
-        firstMean /= count;
-        secondMean /= count;
-
-        var covariance = 0d;
-        var firstVariance = 0d;
-        var secondVariance = 0d;
-        for (var index = 0; index < count; index++)
-        {
-            var firstDelta = first.Returns[index] - firstMean;
-            var secondDelta = second.Returns[index] - secondMean;
-            covariance += firstDelta * secondDelta;
-            firstVariance += firstDelta * firstDelta;
-            secondVariance += secondDelta * secondDelta;
-        }
-
-        return firstVariance <= 0 || secondVariance <= 0
-            ? 0
-            : covariance / Math.Sqrt(firstVariance * secondVariance);
-    }
+    private static double? Correlation(SymbolState first, SymbolState second)
+        => SynchronizedReturnHistory.Correlation(first.Returns, second.Returns);
 
     private void ValidateGenome()
     {
@@ -424,11 +395,9 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         public bool ConfirmationReady => ConfirmationFast?.IsReady == true &&
                                         ConfirmationSlow?.IsReady == true &&
                                         ConfirmationVolatility?.IsReady == true;
-        public List<double> Returns { get; } = new(CorrelationWindow);
+        public SynchronizedReturnHistory Returns { get; } = new(CorrelationWindow);
         public bool MeanReversionEntered { get; set; }
         public bool TrendEntered { get; set; }
-        private double _lastPrice;
-
         public void SetConfirmationIndicators(SimpleMovingAverage fast, SimpleMovingAverage slow, StandardDeviation volatility)
         {
             ConfirmationFast = fast;
@@ -436,15 +405,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             ConfirmationVolatility = volatility;
         }
 
-        public void UpdateReturns(double close)
-        {
-            if (_lastPrice > 0 && close > 0)
-            {
-                Returns.Add((close / _lastPrice) - 1d);
-                if (Returns.Count > CorrelationWindow) Returns.RemoveAt(0);
-            }
-            _lastPrice = close;
-        }
+        public void UpdateReturns(DateTime time, double close) => Returns.Update(time, close);
     }
 
     private sealed record TradeSignal(SymbolState State, double Strength);
@@ -465,5 +426,6 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
     }
 }
+
 
 
