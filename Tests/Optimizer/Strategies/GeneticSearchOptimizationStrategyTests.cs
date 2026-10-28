@@ -230,9 +230,11 @@ public class GeneticSearchOptimizationStrategyTests
             Assert.That(baseline["baselineValidationCount"]!.Value<int>(), Is.EqualTo(2));
             Assert.That(baseline["baselineCandidatesSelectedByTrainingFitness"]!.Value<bool>(), Is.True);
             Assert.That(baseline["minimumBaselineCountForFivePercentResolution"]!.Value<int>(), Is.EqualTo(19));
-            Assert.That(baseline["empiricalComparisonsAreMultipleTestingAdjusted"]!.Value<bool>(), Is.False);
+            Assert.That(baseline["comparisonFamilySize"]!.Value<int>(), Is.EqualTo(2));
+            Assert.That(baseline["familyWiseCorrection"]!.Value<string>(), Does.Contain("Bonferroni"));
             Assert.That(((JArray)baseline["evolvedStrategyComparisons"]!).Count, Is.EqualTo(2));
             Assert.That(baseline["evolvedStrategyComparisons"]![0]!["Comparison"]!["EmpiricalOneSidedPValue"], Is.Not.Null);
+            Assert.That(baseline["evolvedStrategyComparisons"]![0]!["Comparison"]!["BonferroniAdjustedPValue"], Is.Not.Null);
         }
         finally
         {
@@ -281,3 +283,4 @@ public class GeneticSearchOptimizationStrategyTests
         return new OptimizationResult(JsonConvert.SerializeObject(result), parameterSet, Guid.NewGuid().ToString("N"));
     }
 }
+

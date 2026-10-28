@@ -391,10 +391,12 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             .OrderBy(value => value)
             .ToArray();
         var randomBaselineMedian = randomBaselineScores.Length == 0 ? (double?)null : Median(randomBaselineScores);
+        var evolvedFinalists = validation
+            .Where(item => item.Population != StrategyPopulation.RandomBaseline && item.RobustnessAdjustedFitness > GeneticSearchEngine.InvalidFitness)
+            .ToArray();
         var randomizedBaselineComparisons = randomBaselineScores.Length == 0
             ? Array.Empty<object>()
-            : validation
-                .Where(item => item.Population != StrategyPopulation.RandomBaseline && item.RobustnessAdjustedFitness > GeneticSearchEngine.InvalidFitness)
+            : evolvedFinalists
                 .Select(item => (object)new
                 {
                     item.Population,
@@ -402,7 +404,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                     item.TrainingFitness,
                     item.ValidationFitness,
                     item.RobustnessAdjustedFitness,
-                    Comparison = RandomizedBaselineAnalyzer.Compare(item.RobustnessAdjustedFitness, randomBaselineScores)
+                    Comparison = RandomizedBaselineAnalyzer.Compare(item.RobustnessAdjustedFitness, randomBaselineScores, evolvedFinalists.Length)
                 })
                 .ToArray();
         var rankings = new
@@ -417,7 +419,8 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 medianBaselineFitness = randomBaselineMedian,
                 baselineCandidatesSelectedByTrainingFitness = true,
                 minimumBaselineCountForFivePercentResolution = RandomizedBaselineAnalyzer.MinimumBaselineCountForFivePercentResolution,
-                empiricalComparisonsAreMultipleTestingAdjusted = false,
+                familyWiseCorrection = "Bonferroni across evolved validation finalists; does not correct training-stage search or randomized-baseline selection",
+                comparisonFamilySize = evolvedFinalists.Length,
                 evolvedStrategiesAboveBaselineMedian = randomBaselineMedian is null
                     ? 0
                     : validation.Count(item => item.Population != StrategyPopulation.RandomBaseline && item.RobustnessAdjustedFitness > randomBaselineMedian.Value),
@@ -510,3 +513,4 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         public List<ValidationFold> Folds { get; } = new((1 + probeGenomes.Count) * expectedWindowCount);
     }
 }
+
