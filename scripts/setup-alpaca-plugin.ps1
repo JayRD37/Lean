@@ -30,6 +30,20 @@ if (-not (Test-Path $sourceDirectory)) {
     & git -C $sourceDirectory fetch --depth 1 origin $pluginCommit
     if ($LASTEXITCODE -ne 0) { throw "Unable to fetch pinned Alpaca plugin commit $pluginCommit." }
 }
+else {
+    $sourceRoot = (& git -C $sourceDirectory rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [IO.Path]::GetFullPath($sourceRoot.Trim()) -ne [IO.Path]::GetFullPath($sourceDirectory)) {
+        throw "The installer source path '$sourceDirectory' already exists and is not its dedicated plugin checkout; refusing to modify it."
+    }
+    $sourceOrigin = (& git -C $sourceDirectory config --get remote.origin.url).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceOrigin -ne $pluginRepository) {
+        throw "The installer source path '$sourceDirectory' is not the official Alpaca plugin checkout; refusing to modify it."
+    }
+    $sourceChanges = & git -C $sourceDirectory status --porcelain
+    if ($LASTEXITCODE -ne 0 -or $sourceChanges) {
+        throw "The installer source checkout has local changes; refusing to overwrite them."
+    }
+}
 
 $checkedOutCommit = (& git -C $sourceDirectory rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $checkedOutCommit -ne $pluginCommit -or -not (Test-Path $projectPath)) {
@@ -49,8 +63,15 @@ if ($pinnedProjectText -ne $projectText) {
 }
 
 New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
-& dotnet publish $projectPath --configuration Release --framework net10.0 --no-self-contained --output $publishDirectory
-if ($LASTEXITCODE -ne 0) { throw "Building the pinned LEAN Alpaca brokerage plugin failed." }
+try {
+    & dotnet publish $projectPath --configuration Release --framework net10.0 --no-self-contained --output $publishDirectory
+    if ($LASTEXITCODE -ne 0) { throw "Building the pinned LEAN Alpaca brokerage plugin failed." }
+}
+finally {
+    if ($pinnedProjectText -ne $projectText) {
+        [IO.File]::WriteAllText($projectPath, $projectText, [Text.UTF8Encoding]::new($false))
+    }
+}
 
 $requiredFiles = @("QuantConnect.Brokerages.Alpaca.dll", "Alpaca.Markets.dll")
 foreach ($requiredFile in $requiredFiles) {
