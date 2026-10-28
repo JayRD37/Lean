@@ -163,6 +163,37 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void BrokerageSafetyGatePausesOnDisconnectAndResumesAfterReconnect()
+    {
+        var gate = new BrokerageSafetyGate();
+        Assert.That(gate.CanSubmitOrders, Is.True);
+
+        gate.Disconnect();
+        Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.MustLiquidate, Is.False);
+
+        gate.Reconnect();
+        Assert.That(gate.CanSubmitOrders, Is.True);
+    }
+
+    [Test]
+    public void BrokerageSafetyGateKeepsOrderRejectionShutdownLatchedAcrossReconnect()
+    {
+        var gate = new BrokerageSafetyGate();
+        gate.Trip("order rejected");
+
+        Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.MustLiquidate, Is.True);
+        Assert.That(gate.IsConnected, Is.True);
+        Assert.That(gate.TripReason, Is.EqualTo("order rejected"));
+
+        gate.Reconnect();
+        Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.MustLiquidate, Is.True);
+        Assert.Throws<ArgumentException>(() => gate.Trip(" "));
+    }
+
+    [Test]
     public void LifecycleMonitorRetiresImmediatelyAtDrawdownLimit()
     {
         var monitor = new StrategyLifecycleMonitor(

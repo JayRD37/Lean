@@ -25,6 +25,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 {
     private const int CorrelationWindow = 60;
     private readonly Dictionary<Symbol, SymbolState> _symbols = new();
+    private readonly BrokerageSafetyGate _brokerageSafety = new();
     private StrategyFamily _family;
     private Resolution _resolution;
     private int _maxPositions;
@@ -110,8 +111,9 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnData(Slice slice)
     {
-        if (_shutdownRequested)
+        if (_shutdownRequested || _brokerageSafety.MustLiquidate)
         {
+            _shutdownRequested = true;
             LiquidateManagedPositions("emergency shutdown");
             if (_symbols.Keys.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
             return;
@@ -131,6 +133,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
 
         if (IsWarmingUp) return;
+
+        if (!_brokerageSafety.CanSubmitOrders) return;
 
         var equity = Portfolio.TotalPortfolioValue;
         if (equity <= 0) return;
@@ -183,6 +187,36 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             .Select(symbol => new PortfolioTarget(symbol, selectedSymbols.Contains(symbol) ? targetWeight : 0m))
             .ToList();
         SetHoldings(targets, liquidateExistingHoldings: false, tag: $"{_family} {_resolution}");
+    }
+
+    public override void OnBrokerageDisconnect()
+    {
+        _brokerageSafety.Disconnect();
+        Debug("Brokerage disconnected; new strategy orders are paused until reconnection.");
+    }
+
+    public override void OnBrokerageReconnect()
+    {
+        _brokerageSafety.Reconnect();
+        Debug(_brokerageSafety.CanSubmitOrders
+            ? "Brokerage reconnected; strategy order submission resumed."
+            : "Brokerage reconnected, but the execution safety gate remains tripped.");
+    }
+
+    public override void OnBrokerageMessage(BrokerageMessageEvent messageEvent)
+    {
+        Debug($"Brokerage message type={messageEvent.Type}, code={messageEvent.Code}: {messageEvent.Message}");
+    }
+
+    public override void OnOrderEvent(OrderEvent orderEvent)
+    {
+        if (orderEvent.Status != OrderStatus.Invalid) return;
+
+        var reason = $"Order {orderEvent.OrderId} for {orderEvent.Symbol} was invalid: {orderEvent.Message}";
+        _brokerageSafety.Trip(reason);
+        _shutdownRequested = true;
+        Debug($"Execution safety gate tripped. {reason}");
+        LiquidateManagedPositions("invalid order safety shutdown");
     }
 
     /// <summary>Provides an in-process kill switch and can also be called by an algorithm host.</summary>
