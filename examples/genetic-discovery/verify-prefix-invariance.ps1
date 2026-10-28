@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5) {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -55,7 +55,7 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
         'discovery.exit-tenths' = '4'
         'discovery.max-positions' = [string]$MaxPositions
         'discovery.max-exposure-percent' = [string]$MaxExposurePercent
-        'discovery.minimum-spread-bps' = '5'
+        'discovery.minimum-spread-bps' = $MinimumSpreadBps.ToString([Globalization.CultureInfo]::InvariantCulture)
         'discovery.max-correlation' = $MaximumCorrelation.ToString([Globalization.CultureInfo]::InvariantCulture)
         'discovery.max-drawdown' = '0.50'
         'discovery.max-negative-review-periods' = '100'
@@ -161,6 +161,7 @@ function Get-NormalizedOrders($Result, [datetime] $Through) {
 $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
+$costStress = Run-Backtest 'cost-stress' '2019-01-01' '2021-02-15' 'SPY' 'Daily' 'None' 1 50 0.85 $false 200
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
 $multiAssetShort = Run-Backtest 'multi-asset-prefix' '2019-01-01' '2021-02-15' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiAsset = Run-Backtest 'multi-asset' '2019-01-01' '2021-03-31' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
@@ -185,6 +186,10 @@ if ($shortJson -cne $longJson) {
 }
 
 Write-Output "PASS: $($shortOrders.Count) filled orders are identical through $($through.ToString('yyyy-MM-dd'))."
+$baselineNetProfit = [double]::Parse(($short.Result.Statistics.'Net Profit' -replace '%', ''), [Globalization.CultureInfo]::InvariantCulture)
+$stressNetProfit = [double]::Parse(($costStress.Result.Statistics.'Net Profit' -replace '%', ''), [Globalization.CultureInfo]::InvariantCulture)
+if ($stressNetProfit -ge $baselineNetProfit) { throw "LEAN's 200 bps full-spread stress did not reduce net profit (baseline=$baselineNetProfit%, stress=$stressNetProfit%). Inspect $($costStress.LogPath)" }
+Write-Output "PASS: LEAN applied the configured spread/slippage in the fill path; net profit fell from $baselineNetProfit% at 5 bps to $stressNetProfit% at 200 bps."
 $multiShortJson = ConvertTo-Json -InputObject $multiShortOrders -Depth 5 -Compress
 $multiLongJson = ConvertTo-Json -InputObject $multiLongOrders -Depth 5 -Compress
 if ($multiShortOrders.Count -eq 0) { throw "Multi-timeframe prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($multiShort.LogPath)" }
