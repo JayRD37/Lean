@@ -244,25 +244,7 @@ namespace QuantConnect.Lean.Engine
                         .Where(x => !ReferenceEquals(brokerage, x));
                     foreach (var x in new[] { brokerage }.Concat(brokerageDataQueueHandlers))
                     {
-                        x.Message += (sender, message) =>
-                        {
-                            algorithm.BrokerageMessageHandler.HandleMessage(message);
-
-                            if (algorithm.GetLocked())
-                            {
-                                // fire brokerage message events
-                                algorithm.OnBrokerageMessage(message);
-                                switch (message.Type)
-                                {
-                                    case BrokerageMessageType.Disconnect:
-                                        algorithm.OnBrokerageDisconnect();
-                                        break;
-                                    case BrokerageMessageType.Reconnect:
-                                        algorithm.OnBrokerageReconnect();
-                                        break;
-                                }
-                            }
-                        };
+                        BrokerageEventRouter.Subscribe(x, algorithm);
                     }
 
                     //Initialize the internal state of algorithm and job: executes the algorithm.Initialize() method.

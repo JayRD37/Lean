@@ -18,3 +18,4 @@ using System.Runtime.InteropServices;
 [assembly: Guid("5c62be9c-5ecb-413e-bb6e-c6544e5b809c")]
 
 [assembly: InternalsVisibleTo("QuantConnect.Tests")]
+[assembly: InternalsVisibleTo("QuantConnect.Genetic.Tests")]
