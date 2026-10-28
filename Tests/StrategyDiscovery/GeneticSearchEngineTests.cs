@@ -138,6 +138,14 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void HalfSpreadCostAppliesHalfTheConfiguredFullSpreadPerOrder()
+    {
+        Assert.That(ExecutionCostAssumptions.HalfSpreadCost(200m, 10m), Is.EqualTo(0.10m));
+        Assert.That(ExecutionCostAssumptions.HalfSpreadCost(200m, 0m), Is.Zero);
+        Assert.Throws<ArgumentOutOfRangeException>(() => ExecutionCostAssumptions.HalfSpreadCost(200m, -1m));
+    }
+
+    [Test]
     public void LifecycleMonitorSchedulesReviewsAndRetiresAfterRepeatedWeakPeriods()
     {
         var monitor = new StrategyLifecycleMonitor(

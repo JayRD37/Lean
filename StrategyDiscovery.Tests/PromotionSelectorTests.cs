@@ -210,6 +210,7 @@ public class PromotionSelectorTests
             "parameter-robustness-probe-count": 1,
             "maximum-positions": 3,
             "maximum-exposure-percent": 30,
+          "minimum-spread-bps": 5,
           "random-baseline-size": 4,
           "validation-baseline-count": 2,
             "maximum-correlation": 0.8,
@@ -224,6 +225,7 @@ public class PromotionSelectorTests
           "parameters": {
             "discovery.max-positions": "3",
             "discovery.max-exposure-percent": "30",
+            "discovery.minimum-spread-bps": "5",
             "discovery.max-correlation": "0.80",
             "discovery.max-drawdown": "0.08",
             "discovery.symbols": "SPY|QQQ|IWM"

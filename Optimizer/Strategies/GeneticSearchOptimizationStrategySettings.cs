@@ -19,6 +19,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("seed")] public int Seed { get; set; } = 1729;
     [JsonProperty("maximum-positions")] public int MaximumPositions { get; set; } = StrategyGenome.MaxMaxPositions;
     [JsonProperty("maximum-exposure-percent")] public int MaximumExposurePercent { get; set; } = StrategyGenome.MaxExposurePct;
+    [JsonProperty("minimum-spread-bps")] public decimal MinimumSpreadBasisPoints { get; set; } = 5m;
     [JsonProperty("minimum-trades")] public int MinimumTrades { get; set; } = 5;
     [JsonProperty("monte-carlo-simulation-count")] public int MonteCarloSimulationCount { get; set; } = 1000;
     [JsonProperty("maximum-drawdown")] public double MaximumDrawdown { get; set; } = 0.20;
@@ -62,6 +63,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         };
         options.Validate();
         if (MonteCarloSimulationCount < 1) throw new ArgumentOutOfRangeException(nameof(MonteCarloSimulationCount), "MonteCarloSimulationCount must be positive.");
+        if (MinimumSpreadBasisPoints is < 0 or > 500) throw new ArgumentOutOfRangeException(nameof(MinimumSpreadBasisPoints), "MinimumSpreadBasisPoints must be between zero and five hundred.");
 
         if (string.IsNullOrWhiteSpace(Symbols) || Symbols.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Length == 0)
         {

@@ -9,6 +9,7 @@
     "population-size": 2,
     "generation-count": 1,
     "random-baseline-size": 1,
+    "minimum-spread-bps": 5,
     "elite-count": 0,
     "tournament-size": 1,
     "mutation-rate": 0.2,

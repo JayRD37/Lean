@@ -15,6 +15,7 @@
     "seed": 1729,
     "maximum-positions": 3,
     "maximum-exposure-percent": 30,
+    "minimum-spread-bps": 5,
     "minimum-trades": 10,
     "monte-carlo-simulation-count": 1000,
     "maximum-drawdown": 0.08,

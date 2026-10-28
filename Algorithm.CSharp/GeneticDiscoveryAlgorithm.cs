@@ -29,6 +29,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private Resolution _resolution;
     private int _maxPositions;
     private int _maxExposurePercent;
+    private decimal _minimumSpreadBasisPoints;
     private double _maximumCorrelation;
     private double _maximumPortfolioDrawdown;
     private int _fastPeriod;
@@ -52,6 +53,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _exitThreshold = GetParameter("discovery.exit-tenths", 4) / 10d;
         _maxPositions = GetParameter("discovery.max-positions", 3);
         _maxExposurePercent = GetParameter("discovery.max-exposure-percent", 50);
+        _minimumSpreadBasisPoints = (decimal)GetParameter("discovery.minimum-spread-bps", 5d);
         _maximumCorrelation = GetParameter("discovery.max-correlation", 0.85d);
         _maximumPortfolioDrawdown = GetParameter("discovery.max-drawdown", 0.10d);
         _killSwitchFile = GetParameter("discovery.kill-switch-file", "emergency-stop");
@@ -66,7 +68,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
 
         SetBrokerageModel(BrokerageName.Alpaca, AccountType.Margin);
-        AddSecurityInitializer(security => security.SetSlippageModel(new VolumeShareSlippageModel(0.025m, 0.10m)));
+        AddSecurityInitializer(security => security.SetSlippageModel(new SpreadAndVolumeShareSlippageModel(_minimumSpreadBasisPoints)));
         AddRiskManagement(new MaximumDrawdownPercentPortfolio((decimal)_maximumPortfolioDrawdown, isTrailing: true));
 
         if (!LiveMode)
@@ -278,6 +280,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (_entryThreshold <= _exitThreshold || _exitThreshold <= 0) throw new ArgumentException("The entry threshold must exceed the positive exit threshold.");
         if (_maxPositions is < StrategyGenome.MinMaxPositions or > StrategyGenome.MaxMaxPositions) throw new ArgumentOutOfRangeException("discovery.max-positions");
         if (_maxExposurePercent is < StrategyGenome.MinExposurePct or > StrategyGenome.MaxExposurePct) throw new ArgumentOutOfRangeException("discovery.max-exposure-percent");
+        if (_minimumSpreadBasisPoints < 0 || _minimumSpreadBasisPoints > 500) throw new ArgumentOutOfRangeException("discovery.minimum-spread-bps");
         if (_maximumCorrelation is < 0 or > 1) throw new ArgumentOutOfRangeException("discovery.max-correlation");
         if (_maximumPortfolioDrawdown is <= 0 or >= 1) throw new ArgumentOutOfRangeException("discovery.max-drawdown");
     }
@@ -320,4 +323,20 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     }
 
     private sealed record TradeSignal(SymbolState State, double Strength);
+
+    private sealed class SpreadAndVolumeShareSlippageModel(decimal fullSpreadBasisPoints) : ISlippageModel
+    {
+        private readonly VolumeShareSlippageModel _volumeImpact = new(0.025m, 0.10m);
+
+        public decimal GetSlippageApproximation(Security asset, Order order)
+        {
+            var lastData = asset.GetLastData();
+            if (lastData is null) return 0m;
+            var referencePrice = order.Type == OrderType.MarketOnOpen && lastData is IBar bar
+                ? bar.Open
+                : lastData.Value;
+            return ExecutionCostAssumptions.HalfSpreadCost(referencePrice, fullSpreadBasisPoints)
+                + _volumeImpact.GetSlippageApproximation(asset, order);
+        }
+    }
 }

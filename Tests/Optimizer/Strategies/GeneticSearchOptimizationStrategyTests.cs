@@ -48,6 +48,7 @@ public class GeneticSearchOptimizationStrategyTests
         for (var index = 0; index < 5; index++)
         {
             Assert.That(pending.TryDequeue(out var parameterSet), Is.True);
+            Assert.That(parameterSet!.Value["discovery.minimum-spread-bps"], Is.EqualTo("5"));
             strategy.PushNewResults(CreateResult(parameterSet!));
         }
 
@@ -238,6 +239,19 @@ public class GeneticSearchOptimizationStrategyTests
             Config.Set("results-destination-folder", previousDestination);
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Test]
+    public void ExecutionSpreadAssumptionRejectsValuesOutsideConfiguredBounds()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new GeneticSearchOptimizationStrategySettings
+        {
+            MinimumSpreadBasisPoints = -0.1m
+        }.ToDiscoveryOptions());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new GeneticSearchOptimizationStrategySettings
+        {
+            MinimumSpreadBasisPoints = 501m
+        }.ToDiscoveryOptions());
     }
 
     private static OptimizationResult CreateResult(ParameterSet parameterSet)

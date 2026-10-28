@@ -107,6 +107,10 @@ public sealed class SupervisorSettings
             ParseInt(paperParameters["discovery.max-exposure-percent"]),
             "maximum-exposure-percent must match the paper risk limit.");
         RequireEqual(
+            optimizerSettings["minimum-spread-bps"]?.Value<decimal>(),
+            ParseDecimal(paperParameters["discovery.minimum-spread-bps"]),
+            "minimum-spread-bps must match the paper execution-cost setting.");
+        RequireEqual(
             optimizerSettings["maximum-correlation"]?.Value<double>(),
             ParseDouble(paperParameters["discovery.max-correlation"]),
             "maximum-correlation must match the paper risk limit.");
@@ -130,6 +134,8 @@ public sealed class SupervisorSettings
     private static int? ParseInt(JToken? token) => token is null ? null : int.Parse(token.ToString(), System.Globalization.CultureInfo.InvariantCulture);
 
     private static double? ParseDouble(JToken? token) => token is null ? null : double.Parse(token.ToString(), System.Globalization.CultureInfo.InvariantCulture);
+
+    private static decimal? ParseDecimal(JToken? token) => token is null ? null : decimal.Parse(token.ToString(), System.Globalization.CultureInfo.InvariantCulture);
 
     private static void RequireEqual<T>(T? configured, T? paper, string message) where T : struct, IEquatable<T>
     {
