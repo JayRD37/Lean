@@ -72,6 +72,59 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void MonteCarloBootstrapIsRepeatableAndReportsTailRisk()
+    {
+        var returns = new[] { 0.02, -0.03, 0.01, 0.04, -0.01 };
+
+        var first = MonteCarloAnalyzer.Analyze(returns, 2000, 1234);
+        var second = MonteCarloAnalyzer.Analyze(returns, 2000, 1234);
+
+        Assert.That(first, Is.EqualTo(second));
+        Assert.That(first.TradeCount, Is.EqualTo(returns.Length));
+        Assert.That(first.SimulationCount, Is.EqualTo(2000));
+        Assert.That(first.ProbabilityOfLoss, Is.InRange(0d, 1d));
+        Assert.That(first.NinetyFifthPercentileDrawdown, Is.InRange(0d, 1d));
+    }
+
+    [Test]
+    public void MonteCarloRejectsInvalidTradeReturns()
+    {
+        Assert.Throws<ArgumentException>(() => MonteCarloAnalyzer.Analyze([double.NaN], 100, 1));
+        Assert.Throws<ArgumentException>(() => MonteCarloAnalyzer.Analyze([-1d], 100, 1));
+    }
+
+    [Test]
+    public void LifecycleMonitorSchedulesReviewsAndRetiresAfterRepeatedWeakPeriods()
+    {
+        var monitor = new StrategyLifecycleMonitor(
+            new StrategyLifecycleOptions { ReevaluationIntervalDays = 30, MaximumConsecutiveNegativeReviews = 2, RetirementDrawdown = 0.20 },
+            new DateOnly(2024, 1, 1),
+            100m);
+
+        Assert.That(monitor.Observe(new DateOnly(2024, 1, 20), 99m).Action, Is.EqualTo(StrategyLifecycleAction.None));
+        Assert.That(monitor.Observe(new DateOnly(2024, 1, 31), 98m).Action, Is.EqualTo(StrategyLifecycleAction.Reevaluate));
+        var decision = monitor.Observe(new DateOnly(2024, 3, 1), 95m);
+
+        Assert.That(decision.Action, Is.EqualTo(StrategyLifecycleAction.Retire));
+        Assert.That(monitor.IsRetired, Is.True);
+        Assert.That(monitor.Observe(new DateOnly(2024, 3, 2), 95m).Action, Is.EqualTo(StrategyLifecycleAction.Retire));
+    }
+
+    [Test]
+    public void LifecycleMonitorRetiresImmediatelyAtDrawdownLimit()
+    {
+        var monitor = new StrategyLifecycleMonitor(
+            new StrategyLifecycleOptions { RetirementDrawdown = 0.10 },
+            new DateOnly(2024, 1, 1),
+            100m);
+
+        var decision = monitor.Observe(new DateOnly(2024, 1, 2), 90m);
+
+        Assert.That(decision.Action, Is.EqualTo(StrategyLifecycleAction.Retire));
+        Assert.That(decision.DrawdownFromPeak, Is.EqualTo(0.10).Within(1e-12));
+    }
+
+    [Test]
     public void GenomeNormalizationPreservesValidTimeframeAndExposureBounds()
     {
         var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Minute, 150, 1, 1, 30, 99, 99)

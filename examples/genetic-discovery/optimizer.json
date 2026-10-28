@@ -14,6 +14,7 @@
     "mutation-rate": 0.15,
     "seed": 1729,
     "minimum-trades": 10,
+    "monte-carlo-simulation-count": 1000,
     "maximum-drawdown": 0.20,
     "allowed-timeframes": "Daily,Hour",
     "symbols": "SPY,QQQ,IWM,DIA",
@@ -40,5 +41,5 @@
   "maximum-concurrent-backtests": 4,
   "optimizer-close-automatically": true,
   "results-destination-folder": "results/genetic-discovery",
-  "lean-binaries-location": "Launcher/bin/Debug/QuantConnect.Lean.Launcher.dll"
+  "lean-binaries-location": "../../../Launcher/bin/Debug/QuantConnect.Lean.Launcher.dll"
 }

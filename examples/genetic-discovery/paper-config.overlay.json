@@ -27,6 +27,9 @@
     "discovery.max-exposure-percent": "30",
     "discovery.max-correlation": "0.80",
     "discovery.max-drawdown": "0.08",
+    "discovery.retirement-drawdown": "0.15",
+    "discovery.reevaluation-interval-days": "30",
+    "discovery.max-negative-review-periods": "3",
     "discovery.symbols": "SPY|QQQ|IWM",
     "discovery.kill-switch-file": "emergency-stop"
   }

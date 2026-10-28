@@ -17,6 +17,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("mutation-rate")] public double MutationRate { get; set; } = 0.15;
     [JsonProperty("seed")] public int Seed { get; set; } = 1729;
     [JsonProperty("minimum-trades")] public int MinimumTrades { get; set; } = 5;
+    [JsonProperty("monte-carlo-simulation-count")] public int MonteCarloSimulationCount { get; set; } = 1000;
     [JsonProperty("maximum-drawdown")] public double MaximumDrawdown { get; set; } = 0.20;
     [JsonProperty("allowed-timeframes")] public string AllowedTimeframes { get; set; } = "Daily,Hour";
     [JsonProperty("symbols")] public string Symbols { get; set; } = "SPY,QQQ,IWM";
@@ -53,6 +54,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
             AllowedTimeframes = timeframes
         };
         options.Validate();
+        if (MonteCarloSimulationCount < 1) throw new ArgumentOutOfRangeException(nameof(MonteCarloSimulationCount), "MonteCarloSimulationCount must be positive.");
 
         if (string.IsNullOrWhiteSpace(Symbols) || Symbols.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Length == 0)
         {

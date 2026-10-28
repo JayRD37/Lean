@@ -238,7 +238,30 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 return null;
             }
 
-            return new StrategyBacktestMetrics(annualReturn.Value, sharpe.Value, drawdown.Value, winRate.Value, (int)tradesValue.Value, totalReturn.Value);
+            var closedTrades = GetToken(GetToken(root, "totalPerformance") as JObject, "closedTrades") as JArray;
+            var tradeReturns = closedTrades?
+                .OfType<JObject>()
+                .Select(trade =>
+                {
+                    var profitLoss = ReadNumber(GetToken(trade, "profitLoss"));
+                    var entryPrice = ReadNumber(GetToken(trade, "entryPrice"));
+                    var quantity = ReadNumber(GetToken(trade, "quantity"));
+                    return profitLoss is not null && entryPrice > 0 && quantity > 0
+                        ? profitLoss.Value / (entryPrice.Value * Math.Abs(quantity.Value))
+                        : (double?)null;
+                })
+                .Where(value => value.HasValue && double.IsFinite(value.Value) && value.Value > -1d)
+                .Select(value => value!.Value)
+                .ToArray();
+
+            return new StrategyBacktestMetrics(
+                annualReturn.Value,
+                sharpe.Value,
+                drawdown.Value,
+                winRate.Value,
+                (int)tradesValue.Value,
+                totalReturn.Value,
+                tradeReturns);
         }
         catch (JsonException)
         {
@@ -276,6 +299,9 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             candidate.Genome,
             BacktestId = result.BacktestId,
             Metrics = metrics,
+            MonteCarlo = metrics?.TradeReturns is { Count: > 0 }
+                ? MonteCarloAnalyzer.Analyze(metrics.TradeReturns, _settings.MonteCarloSimulationCount, _settings.Seed ^ candidate.Id)
+                : null,
             Fitness = metrics is null ? GeneticSearchEngine.InvalidFitness : GeneticSearchEngine.Score(metrics, candidate.Population, _settings.MinimumTrades, _settings.MaximumDrawdown)
         };
         try
@@ -299,12 +325,27 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
     {
         if (string.IsNullOrWhiteSpace(_historyFile)) return;
         var path = Path.Combine(Path.GetDirectoryName(_historyFile), "genetic-search-rankings.json");
+        var validation = _validationRecords.OrderByDescending(item => item.ValidationFitness).ToArray();
+        var randomBaselineScores = validation
+            .Where(item => item.Population == StrategyPopulation.RandomBaseline && item.ValidationFitness > GeneticSearchEngine.InvalidFitness)
+            .Select(item => item.ValidationFitness)
+            .OrderBy(value => value)
+            .ToArray();
+        var randomBaselineMedian = randomBaselineScores.Length == 0 ? (double?)null : Median(randomBaselineScores);
         var rankings = new
         {
             training = _engine.Results
                 .GroupBy(result => result.Population)
                 .ToDictionary(group => group.Key.ToString(), group => group.OrderByDescending(item => item.Fitness).ThenBy(item => item.CandidateId).ToArray()),
-            validation = _validationRecords.OrderByDescending(item => item.ValidationFitness).ToArray()
+            validation,
+            randomizedBaselineComparison = new
+            {
+                baselineValidationCount = randomBaselineScores.Length,
+                medianBaselineFitness = randomBaselineMedian,
+                evolvedStrategiesAboveBaselineMedian = randomBaselineMedian is null
+                    ? 0
+                    : validation.Count(item => item.Population != StrategyPopulation.RandomBaseline && item.ValidationFitness > randomBaselineMedian.Value)
+            }
         };
         try
         {
@@ -318,6 +359,14 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         {
             Log.Error(exception, "Unable to write genetic-search rankings; the backtest result remains available in LEAN's result files.");
         }
+    }
+
+    private static double Median(IReadOnlyList<double> sortedValues)
+    {
+        var middle = sortedValues.Count / 2;
+        return sortedValues.Count % 2 == 0
+            ? (sortedValues[middle - 1] + sortedValues[middle]) / 2d
+            : sortedValues[middle];
     }
 
     private enum EvaluationPhase

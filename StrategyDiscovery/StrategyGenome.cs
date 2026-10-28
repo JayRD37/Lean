@@ -125,7 +125,8 @@ public sealed record StrategyBacktestMetrics(
     double Drawdown,
     double WinRate,
     int TradeCount,
-    double TotalReturn);
+    double TotalReturn,
+    IReadOnlyList<double>? TradeReturns = null);
 
 public sealed record ScoredGenome(
     int CandidateId,

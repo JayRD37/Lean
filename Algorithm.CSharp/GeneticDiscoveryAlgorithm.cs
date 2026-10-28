@@ -38,6 +38,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private string _killSwitchFile;
     private bool _shutdownRequested;
     private decimal _portfolioHighWatermark;
+    private StrategyLifecycleMonitor _lifecycleMonitor;
+    private StrategyLifecycleOptions _lifecycleOptions;
 
     public override void Initialize()
     {
@@ -96,6 +98,12 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
         SetWarmUp(_slowPeriod + CorrelationWindow, _resolution);
         _portfolioHighWatermark = Portfolio.TotalPortfolioValue;
+        _lifecycleOptions = new StrategyLifecycleOptions
+        {
+            ReevaluationIntervalDays = GetParameter("discovery.reevaluation-interval-days", 30),
+            MaximumConsecutiveNegativeReviews = GetParameter("discovery.max-negative-review-periods", 3),
+            RetirementDrawdown = GetParameter("discovery.retirement-drawdown", 0.15d)
+        };
     }
 
     public override void OnData(Slice slice)
@@ -122,6 +130,22 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
         if (IsWarmingUp) return;
 
+        var equity = Portfolio.TotalPortfolioValue;
+        if (equity <= 0) return;
+        _lifecycleMonitor ??= new StrategyLifecycleMonitor(_lifecycleOptions, DateOnly.FromDateTime(Time), equity);
+        var health = _lifecycleMonitor.Observe(DateOnly.FromDateTime(Time), equity);
+        if (health.Action == StrategyLifecycleAction.Retire)
+        {
+            _shutdownRequested = true;
+            Debug($"Strategy retired after scheduled health review: return={health.PeriodReturn:P2}, drawdown={health.DrawdownFromPeak:P2}, negativeReviews={health.ConsecutiveNegativeReviews}.");
+            Liquidate(tag: "strategy health retirement");
+            return;
+        }
+        if (health.Action == StrategyLifecycleAction.Reevaluate)
+        {
+            Debug($"Scheduled strategy reevaluation requested: return={health.PeriodReturn:P2}, drawdown={health.DrawdownFromPeak:P2}.");
+        }
+
         var candidates = new List<TradeSignal>();
         foreach (var state in _symbols.Values)
         {
@@ -134,9 +158,10 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             if (_family == StrategyFamily.TrendFollowing)
             {
                 state.MeanReversionEntered = false;
-                strength = state.Fast.Current.Value > state.Slow.Current.Value
-                    ? (double)(state.Fast.Current.Value - state.Slow.Current.Value) / (double)price
-                    : 0;
+                var spread = (double)(state.Fast.Current.Value - state.Slow.Current.Value) / (double)price;
+                if (spread >= _entryThreshold / 100d) state.TrendEntered = true;
+                else if (spread <= _exitThreshold / 100d) state.TrendEntered = false;
+                strength = state.TrendEntered ? Math.Max(0, spread) : 0;
             }
             else
             {
@@ -260,6 +285,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         public StandardDeviation Volatility { get; } = volatility;
         public List<double> Returns { get; } = new(CorrelationWindow);
         public bool MeanReversionEntered { get; set; }
+        public bool TrendEntered { get; set; }
         private double _lastPrice;
 
         public void UpdateReturns(double close)

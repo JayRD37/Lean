@@ -56,6 +56,37 @@ public class GeneticSearchOptimizationStrategyTests
         Assert.That(strategy.Solution.ParameterSet.Value["discovery.validation-start"], Is.EqualTo("2023-01-01"));
     }
 
+    [Test]
+    public void MissingBacktestStatisticsAreRejectedWithoutBreakingTheOptimizationRun()
+    {
+        var strategy = new GeneticSearchOptimizationStrategy();
+        var pending = new Queue<ParameterSet>();
+        strategy.NewParameterSet += (_, parameterSet) => pending.Enqueue(parameterSet);
+        strategy.Initialize(
+            new Target("Statistics.Sharpe Ratio", new Maximization(), null),
+            Array.Empty<Constraint>(),
+            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new GeneticSearchOptimizationStrategySettings
+            {
+                PopulationSize = 2,
+                GenerationCount = 1,
+                RandomBaselineSize = 0,
+                EliteCount = 0,
+                TournamentSize = 1,
+                ValidationFinalistCount = 1,
+                AllowedTimeframes = "Daily"
+            });
+
+        strategy.PushNewResults(OptimizationResult.Initial);
+        while (pending.TryDequeue(out var parameterSet))
+        {
+            strategy.PushNewResults(new OptimizationResult("{}", parameterSet!, Guid.NewGuid().ToString("N")));
+        }
+
+        Assert.That(strategy.Solution, Is.Null);
+        Assert.That(pending, Is.Empty);
+    }
+
     private static OptimizationResult CreateResult(ParameterSet parameterSet)
     {
         var result = new
@@ -71,7 +102,13 @@ public class GeneticSearchOptimizationStrategyTests
             },
             totalPerformance = new
             {
-                tradeStatistics = new { totalNumberOfTrades = 20 }
+                tradeStatistics = new { totalNumberOfTrades = 20 },
+                closedTrades = new[]
+                {
+                    new { profitLoss = 20d, entryPrice = 100d, quantity = 2d },
+                    new { profitLoss = -10d, entryPrice = 100d, quantity = 1d },
+                    new { profitLoss = 5d, entryPrice = 50d, quantity = 1d }
+                }
             }
         };
         return new OptimizationResult(JsonConvert.SerializeObject(result), parameterSet, Guid.NewGuid().ToString("N"));
