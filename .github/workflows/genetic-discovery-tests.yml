@@ -61,5 +61,8 @@ jobs:
       - name: Build the full LEAN solution
         run: dotnet build QuantConnect.Lean.sln --configuration Release --verbosity quiet /p:WarningLevel=1
 
+      - name: Run the pinned Alpaca brokerage plugin tests
+        run: dotnet test ../Lean.Brokerages.Alpaca-b92d6ecd391d5a79e91b060668d1ea4fafec9b89/QuantConnect.AlpacaBrokerage.Tests/QuantConnect.AlpacaBrokerage.Tests.csproj --configuration Release --verbosity minimal
+
       - name: Run genetic discovery and supervisor tests
         run: dotnet test StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --no-build --verbosity minimal
