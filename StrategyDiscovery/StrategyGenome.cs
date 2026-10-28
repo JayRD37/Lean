@@ -3,7 +3,8 @@ namespace QuantConnect.Genetic;
 public enum StrategyFamily
 {
     TrendFollowing,
-    MeanReversion
+    MeanReversion,
+    Breakout
 }
 
 public enum StrategyTimeframe
@@ -21,7 +22,7 @@ public enum StrategyPopulation
 }
 
 /// <summary>
-/// Compact, serializable genome for a long-only moving-average strategy.
+/// Compact, serializable genome for the supported long-only strategy families.
 /// Thresholds are stored in tenths to keep mutation deterministic and bounded.
 /// </summary>
 public sealed record StrategyGenome(

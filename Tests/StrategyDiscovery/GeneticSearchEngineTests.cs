@@ -61,6 +61,15 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void CandidateGenerationIncludesBreakoutArchetypes()
+    {
+        var options = CreateOptions() with { PopulationSize = 32, GenerationCount = 1, RandomBaselineSize = 0, EliteCount = 0 };
+        var candidates = new GeneticSearchEngine(options).Start();
+
+        Assert.That(candidates.Any(candidate => candidate.Genome.Family == StrategyFamily.Breakout), Is.True);
+    }
+
+    [Test]
     public void CandidateGenerationRespectsConfiguredPaperPositionAndExposureCaps()
     {
         var options = CreateOptions() with { MaximumPositions = 3, MaximumExposurePercent = 30 };

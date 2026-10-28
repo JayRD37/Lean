@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5, [string] $UniverseMode = 'Configured', [int] $UniverseSize = 20, [decimal] $MaximumDrawdown = 0.50) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5, [string] $UniverseMode = 'Configured', [int] $UniverseSize = 20, [decimal] $MaximumDrawdown = 0.50, [string] $Family = 'TrendFollowing') {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -50,7 +50,7 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
         'discovery.universe-size' = [string]$UniverseSize
         'discovery.timeframe' = $Timeframe
         'discovery.confirmation-timeframe' = $ConfirmationTimeframe
-        'discovery.family' = 'TrendFollowing'
+        'discovery.family' = $Family
         'discovery.fast-period' = '10'
         'discovery.slow-period' = '40'
         'discovery.entry-tenths' = '12'
@@ -172,6 +172,8 @@ $multiAssetShort = Run-Backtest 'multi-asset-prefix' '2019-01-01' '2021-02-15' '
 $multiAsset = Run-Backtest 'multi-asset' '2019-01-01' '2021-03-31' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiShort = Run-Backtest 'multi-prefix' '2020-01-02' '2021-02-15' 'SPY' 'Hour' 'Daily'
 $multiLong = Run-Backtest 'multi-full-history' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
+$breakoutShort = Run-Backtest -Name 'breakout-prefix' -StartDate '2019-01-01' -EndDate '2021-02-15' -Symbol 'SPY' -MaximumDrawdown 0.50 -Family 'Breakout'
+$breakoutLong = Run-Backtest -Name 'breakout-full-history' -StartDate '2019-01-01' -EndDate '2021-03-31' -Symbol 'SPY' -MaximumDrawdown 0.50 -Family 'Breakout'
 $drawdownRun = Run-Backtest -Name 'drawdown-shutdown' -StartDate '2019-01-01' -EndDate '2020-05-01' -Symbol 'SPY' -MaximumDrawdown 0.05
 Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
@@ -181,6 +183,8 @@ $multiShortOrders = @(Get-NormalizedOrders $multiShort.Result $through)
 $multiLongOrders = @(Get-NormalizedOrders $multiLong.Result $through)
 $multiAssetShortOrders = @(Get-NormalizedOrders $multiAssetShort.Result $through)
 $multiAssetLongOrders = @(Get-NormalizedOrders $multiAsset.Result $through)
+$breakoutShortOrders = @(Get-NormalizedOrders $breakoutShort.Result $through)
+$breakoutLongOrders = @(Get-NormalizedOrders $breakoutLong.Result $through)
 $universeThrough = [datetime]'2014-04-02'
 $pointInTimeUniverseShortOrders = @(Get-NormalizedOrders $pointInTimeUniverseShort.Result $universeThrough)
 $pointInTimeUniverseLongOrders = @(Get-NormalizedOrders $pointInTimeUniverse.Result $universeThrough)
@@ -230,6 +234,12 @@ $multiAssetLongJson = ConvertTo-Json -InputObject $multiAssetLongOrders -Depth 5
 if ($multiAssetShortOrders.Count -eq 0) { throw "Multi-asset prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($multiAssetShort.LogPath)" }
 if ($multiAssetShortJson -cne $multiAssetLongJson) { throw "Multi-asset prefix/full-history orders differ through $($through.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
 Write-Output "PASS: $($multiAssetShortOrders.Count) multi-asset fills are identical through $($through.ToString('yyyy-MM-dd'))."
+$breakoutShortJson = ConvertTo-Json -InputObject $breakoutShortOrders -Depth 5 -Compress
+$breakoutLongJson = ConvertTo-Json -InputObject $breakoutLongOrders -Depth 5 -Compress
+if ($breakoutShortOrders.Count -eq 0) { throw "Breakout prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($breakoutShort.LogPath)" }
+if ($breakoutShortJson -cne $breakoutLongJson) { throw "Breakout prefix/full-history orders differ through $($through.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
+if ((Get-Content -LiteralPath $breakoutShort.AlgorithmLogPath -Raw) -match 'Execution safety gate tripped') { throw "Breakout backtest hit an invalid-order safety trip; inspect $($breakoutShort.AlgorithmLogPath)" }
+Write-Output "PASS: $($breakoutShortOrders.Count) breakout-family LEAN fills are identical through $($through.ToString('yyyy-MM-dd'))."
 $selectionAudit = Get-Content -LiteralPath $multiAsset.AlgorithmLogPath | Where-Object { $_ -match 'Portfolio selection audit:' }
 if ($multiAssetSymbols.Count -lt 2) { throw "The multi-asset backtest filled fewer than two configured symbols; inspect $($multiAsset.AlgorithmLogPath)" }
 if ($selectionAudit.Count -eq 0) { throw "No portfolio selection audit records were emitted for the multi-asset run; inspect $($multiAsset.AlgorithmLogPath)" }

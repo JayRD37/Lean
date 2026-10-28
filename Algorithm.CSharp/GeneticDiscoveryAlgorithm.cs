@@ -174,7 +174,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         foreach (var state in _symbols.Values)
         {
             if (!slice.Bars.TryGetValue(state.Symbol, out TradeBar bar)) continue;
-            state.UpdateReturns(bar.EndTime, (double)bar.Close);
+            state.UpdateBar(bar, allowSignals: !IsWarmingUp);
         }
 
         if (IsWarmingUp) return;
@@ -222,9 +222,17 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             }
             else
             {
-                if (zScore <= -_entryThreshold) state.MeanReversionEntered = true;
-                else if (zScore >= -_exitThreshold) state.MeanReversionEntered = false;
-                strength = state.MeanReversionEntered ? Math.Max(0, -zScore) : 0;
+                if (_family == StrategyFamily.MeanReversion)
+                {
+                    if (zScore <= -_entryThreshold) state.MeanReversionEntered = true;
+                    else if (zScore >= -_exitThreshold) state.MeanReversionEntered = false;
+                    strength = state.MeanReversionEntered ? Math.Max(0, -zScore) : 0;
+                }
+                else
+                {
+                    var breakout = state.Breakout.Current;
+                    strength = breakout.IsEntered ? breakout.Strength : 0;
+                }
             }
 
             if (strength > 0 && (_confirmationTimeframe is null || ConfirmationAgrees(state, price)))
@@ -356,7 +364,12 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private void AddSymbolState(Symbol symbol, bool warmUp)
     {
         if (_symbols.ContainsKey(symbol)) return;
-        var state = new SymbolState(symbol, SMA(symbol, _fastPeriod), SMA(symbol, _slowPeriod), STD(symbol, _slowPeriod));
+        var state = new SymbolState(
+            symbol,
+            SMA(symbol, _fastPeriod),
+            SMA(symbol, _slowPeriod),
+            STD(symbol, _slowPeriod),
+            new BreakoutChannel(_fastPeriod, _slowPeriod, _entryThreshold));
         if (_confirmationResolution is { } confirmationResolution)
         {
             state.SetConfirmationIndicators(
@@ -377,9 +390,9 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             WarmUpIndicator(symbol, state.ConfirmationSlow!, resolution);
             WarmUpIndicator(symbol, state.ConfirmationVolatility!, resolution);
         }
-        foreach (var bar in History<TradeBar>(symbol, CorrelationWindow + 1, _resolution))
+        foreach (var bar in History<TradeBar>(symbol, Math.Max(CorrelationWindow + 1, _slowPeriod + 1), _resolution))
         {
-            state.UpdateReturns(bar.EndTime, (double)bar.Close);
+            state.UpdateBar(bar, allowSignals: false);
         }
     }
 
@@ -420,7 +433,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             return false;
         }
 
-        if (_family == StrategyFamily.TrendFollowing)
+        if (_family is StrategyFamily.TrendFollowing or StrategyFamily.Breakout)
         {
             return fast.Current.Value > slow.Current.Value;
         }
@@ -481,12 +494,13 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     private static DateTime ParseDate(string value) => DateTime.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-    private sealed class SymbolState(Symbol symbol, SimpleMovingAverage fast, SimpleMovingAverage slow, StandardDeviation volatility)
+    private sealed class SymbolState(Symbol symbol, SimpleMovingAverage fast, SimpleMovingAverage slow, StandardDeviation volatility, BreakoutChannel breakout)
     {
         public Symbol Symbol { get; } = symbol;
         public SimpleMovingAverage Fast { get; } = fast;
         public SimpleMovingAverage Slow { get; } = slow;
         public StandardDeviation Volatility { get; } = volatility;
+        public BreakoutChannel Breakout { get; } = breakout;
         public SimpleMovingAverage? ConfirmationFast { get; private set; }
         public SimpleMovingAverage? ConfirmationSlow { get; private set; }
         public StandardDeviation? ConfirmationVolatility { get; private set; }
@@ -504,7 +518,11 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             ConfirmationVolatility = volatility;
         }
 
-        public void UpdateReturns(DateTime time, double close) => Returns.Update(time, close);
+        public void UpdateBar(TradeBar bar, bool allowSignals = true)
+        {
+            Returns.Update(bar.EndTime, (double)bar.Close);
+            Breakout.Update(bar.EndTime, bar.High, bar.Low, bar.Close, allowSignals);
+        }
     }
 
     private sealed record TradeSignal(SymbolState State, double Strength);
