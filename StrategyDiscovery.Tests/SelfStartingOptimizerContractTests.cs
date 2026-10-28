@@ -10,6 +10,23 @@ namespace QuantConnect.Genetic.Tests;
 [TestFixture]
 public sealed class SelfStartingOptimizerContractTests
 {
+    private const string BacktestResult = """
+        {
+          "statistics": {
+            "Compounding Annual Return": "12.0%",
+            "Sharpe Ratio": "1.2",
+            "Drawdown": "5.0%",
+            "Win Rate": "55.0%",
+            "Total Trades": "20",
+            "Net Profit": "18.0%"
+          },
+          "totalPerformance": {
+            "tradeStatistics": { "totalNumberOfTrades": 20 },
+            "closedTrades": []
+          }
+        }
+        """;
+
     [Test]
     public void GeneticOptimizerAcceptsAnEmptyInputParameterSet()
     {
@@ -21,24 +38,28 @@ public sealed class SelfStartingOptimizerContractTests
     }
 
     [Test]
-    public void GeneticOptimizerQueuesGeneratedCandidatesThroughLeanBacktestRunner()
+    public void GeneticOptimizerRunsCandidateEvolutionValidationAndConfirmationThroughLean()
     {
         using var optimizer = new OptimizerProbe(CreatePacket(
             typeof(GeneticSearchOptimizationStrategy),
             new GeneticSearchOptimizationStrategySettings
             {
                 PopulationSize = 2,
-                GenerationCount = 1,
+                GenerationCount = 2,
                 RandomBaselineSize = 1,
                 EliteCount = 0,
                 TournamentSize = 1,
                 AllowedTimeframes = "Daily",
                 ValidationFinalistCount = 1,
-                ValidationBaselineCount = 0,
-                ParameterRobustnessProbeCount = 0
+                ValidationBaselineCount = 1,
+                ValidationWindowCount = 1,
+                ParameterRobustnessProbeCount = 0,
+                MinimumTrades = 0,
+                MaximumDrawdown = 0.9
             },
             maximumConcurrentBacktests: 2));
 
+        var expectedBacktestCount = optimizer.GetTotalBacktestEstimate();
         optimizer.Start();
 
         Assert.That(optimizer.StartedParameterSets, Has.Count.EqualTo(2));
@@ -49,28 +70,28 @@ public sealed class SelfStartingOptimizerContractTests
         Assert.That(optimizer.RunningCount, Is.EqualTo(2));
         Assert.That(optimizer.PendingCount, Is.EqualTo(3));
 
-        optimizer.CompleteNextBacktest("""
-            {
-              "statistics": {
-                "Compounding Annual Return": "12.0%",
-                "Sharpe Ratio": "1.2",
-                "Drawdown": "5.0%",
-                "Win Rate": "55.0%",
-                "Total Trades": "20",
-                "Net Profit": "18.0%"
-              },
-              "totalPerformance": {
-                "tradeStatistics": { "totalNumberOfTrades": 20 },
-                "closedTrades": []
-              }
-            }
-            """);
+        optimizer.CompleteNextBacktest(BacktestResult);
 
         Assert.That(optimizer.StartedParameterSets, Has.Count.EqualTo(3));
         Assert.That(optimizer.StartedParameterSets[^1].Value["discovery.phase"], Is.EqualTo("Training"));
         Assert.That(optimizer.RunningCount, Is.EqualTo(2));
         Assert.That(optimizer.PendingCount, Is.EqualTo(2));
         Assert.That(optimizer.GetRuntimeStatistics()["Completed"], Is.EqualTo("1"));
+
+        for (var completed = 1; completed < expectedBacktestCount; completed++)
+        {
+            optimizer.CompleteNextBacktest(BacktestResult);
+        }
+
+        Assert.That(optimizer.StartedParameterSets, Has.Count.EqualTo(expectedBacktestCount));
+        Assert.That(optimizer.StartedParameterSets.Count(item => item.Value["discovery.phase"] == "Training"), Is.EqualTo(10));
+        Assert.That(optimizer.StartedParameterSets.Count(item => item.Value["discovery.phase"] == "Validation"), Is.EqualTo(3));
+        Assert.That(optimizer.StartedParameterSets.Count(item => item.Value["discovery.phase"] == "Confirmation"), Is.EqualTo(1));
+        Assert.That(optimizer.Solution, Is.Not.Null);
+        Assert.That(optimizer.Solution!.ParameterSet.Value["discovery.phase"], Is.EqualTo("Confirmation"));
+        Assert.That(optimizer.RunningCount, Is.Zero);
+        Assert.That(optimizer.PendingCount, Is.Zero);
+        Assert.That(optimizer.GetRuntimeStatistics()["Completed"], Is.EqualTo(expectedBacktestCount.ToString()));
     }
 
     [Test]
@@ -102,6 +123,7 @@ public sealed class SelfStartingOptimizerContractTests
         public List<ParameterSet> StartedParameterSets { get; } = new();
         public int RunningCount => RunningParameterSetForBacktest.Count;
         public int PendingCount => PendingParameterSet.Count;
+        public OptimizationResult? Solution => Strategy.Solution;
 
         protected override string RunLean(ParameterSet parameterSet, string backtestName)
         {
@@ -122,5 +144,6 @@ public sealed class SelfStartingOptimizerContractTests
         }
     }
 }
+
 
 
