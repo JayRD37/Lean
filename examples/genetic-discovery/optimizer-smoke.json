@@ -22,6 +22,7 @@
     "maximum-portfolio-drawdown": 0.5,
     "validation-finalist-count": 1,
     "validation-baseline-count": 1,
+    "validation-window-count": 1,
     "training-start-date": "2021-01-04",
     "training-end-date": "2021-02-15",
     "validation-start-date": "2021-02-16",

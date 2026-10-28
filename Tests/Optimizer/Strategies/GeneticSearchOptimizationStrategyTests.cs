@@ -33,6 +33,7 @@ public class GeneticSearchOptimizationStrategyTests
                 TournamentSize = 1,
                 ValidationFinalistCount = 1,
                 ValidationBaselineCount = 1,
+                ValidationWindowCount = 1,
                 AllowedTimeframes = "Daily"
             });
 
@@ -54,6 +55,55 @@ public class GeneticSearchOptimizationStrategyTests
         Assert.That(strategy.Solution.ParameterSet.Value["discovery.phase"], Is.EqualTo("Validation"));
         Assert.That(strategy.Solution.ParameterSet.Value["discovery.train-end"], Is.EqualTo("2022-12-31"));
         Assert.That(strategy.Solution.ParameterSet.Value["discovery.validation-start"], Is.EqualTo("2023-01-01"));
+    }
+
+    [Test]
+    public void WalkForwardValidationSplitsTheHoldoutAndWaitsForAllWindowsPerFinalist()
+    {
+        var strategy = new GeneticSearchOptimizationStrategy();
+        var pending = new Queue<ParameterSet>();
+        strategy.NewParameterSet += (_, parameterSet) => pending.Enqueue(parameterSet);
+        strategy.Initialize(
+            new Target("Statistics.Sharpe Ratio", new Maximization(), null),
+            Array.Empty<Constraint>(),
+            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new GeneticSearchOptimizationStrategySettings
+            {
+                PopulationSize = 2,
+                GenerationCount = 1,
+                RandomBaselineSize = 1,
+                EliteCount = 0,
+                TournamentSize = 1,
+                ValidationFinalistCount = 1,
+                ValidationBaselineCount = 1,
+                ValidationWindowCount = 3,
+                AllowedTimeframes = "Daily"
+            });
+
+        strategy.PushNewResults(OptimizationResult.Initial);
+        for (var index = 0; index < 5; index++)
+        {
+            Assert.That(pending.TryDequeue(out var training), Is.True);
+            strategy.PushNewResults(CreateResult(training!));
+        }
+
+        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(14));
+        Assert.That(pending, Has.Count.EqualTo(9));
+        var firstFinalistWindows = new List<(string Start, string End)>();
+        for (var index = 0; index < 3; index++)
+        {
+            Assert.That(pending.TryDequeue(out var parameterSet), Is.True);
+            Assert.That(parameterSet!.Value["discovery.validation-window-index"], Is.EqualTo(index.ToString()));
+            firstFinalistWindows.Add((parameterSet.Value["discovery.validation-start"], parameterSet.Value["discovery.validation-end"]));
+            strategy.PushNewResults(CreateResult(parameterSet));
+            if (index < 2) Assert.That(strategy.Solution, Is.Null);
+        }
+
+        Assert.That(firstFinalistWindows[0].Start, Is.EqualTo("2023-01-01"));
+        Assert.That(DateOnly.Parse(firstFinalistWindows[0].End).AddDays(1), Is.EqualTo(DateOnly.Parse(firstFinalistWindows[1].Start)));
+        Assert.That(DateOnly.Parse(firstFinalistWindows[1].End).AddDays(1), Is.EqualTo(DateOnly.Parse(firstFinalistWindows[2].Start)));
+        Assert.That(firstFinalistWindows[^1].End, Is.EqualTo("2024-12-31"));
+        Assert.That(strategy.Solution, Is.Not.Null);
     }
 
     [Test]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Newtonsoft.Json;
@@ -25,6 +26,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("maximum-portfolio-drawdown")] public double MaximumPortfolioDrawdown { get; set; } = 0.10;
     [JsonProperty("validation-finalist-count")] public int ValidationFinalistCount { get; set; } = 2;
     [JsonProperty("validation-baseline-count")] public int ValidationBaselineCount { get; set; } = 2;
+    [JsonProperty("validation-window-count")] public int ValidationWindowCount { get; set; } = 3;
     [JsonProperty("training-start-date")] public string TrainingStartDate { get; set; } = "2018-01-01";
     [JsonProperty("training-end-date")] public string TrainingEndDate { get; set; } = "2022-12-31";
     [JsonProperty("validation-start-date")] public string ValidationStartDate { get; set; } = "2023-01-01";
@@ -70,6 +72,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         }
         if (ValidationFinalistCount < 1) throw new ArgumentOutOfRangeException(nameof(ValidationFinalistCount), "At least one evolved strategy must be validated.");
         if (ValidationBaselineCount < 0) throw new ArgumentOutOfRangeException(nameof(ValidationBaselineCount), "ValidationBaselineCount cannot be negative.");
+        if (ValidationWindowCount < 1) throw new ArgumentOutOfRangeException(nameof(ValidationWindowCount), "At least one chronological validation window is required.");
         var trainingStart = DateOnly.ParseExact(TrainingStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var trainingEnd = DateOnly.ParseExact(TrainingEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var validationStart = DateOnly.ParseExact(ValidationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -78,9 +81,15 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         {
             throw new ArgumentException("Training dates must be ordered before the disjoint validation date range.");
         }
+        _ = WalkForwardWindow.Split(validationStart, validationEnd, ValidationWindowCount);
 
         return options;
     }
+
+    public IReadOnlyList<WalkForwardWindow> GetValidationWindows() => WalkForwardWindow.Split(
+        DateOnly.ParseExact(ValidationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        DateOnly.ParseExact(ValidationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        ValidationWindowCount);
 
     public string SymbolsForParameterSet => string.Join('|', Symbols
         .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)

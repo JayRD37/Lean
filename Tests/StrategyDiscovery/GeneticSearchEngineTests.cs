@@ -139,6 +139,26 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void WalkForwardWindowsAreChronologicalContiguousAndCoverTheInclusiveRange()
+    {
+        var start = new DateOnly(2023, 1, 1);
+        var end = new DateOnly(2023, 6, 30);
+        var windows = WalkForwardWindow.Split(start, end, 3);
+
+        Assert.That(windows, Has.Count.EqualTo(3));
+        Assert.That(windows[0].Start, Is.EqualTo(start));
+        Assert.That(windows[^1].End, Is.EqualTo(end));
+        for (var index = 0; index < windows.Count; index++)
+        {
+            Assert.That(windows[index].Index, Is.EqualTo(index));
+            Assert.That(windows[index].Start, Is.LessThanOrEqualTo(windows[index].End));
+            if (index > 0) Assert.That(windows[index - 1].End.AddDays(1), Is.EqualTo(windows[index].Start));
+        }
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => WalkForwardWindow.Split(start, end, 182));
+    }
+
+    [Test]
     public void DuplicateOrUnknownCandidateCompletionIsRejected()
     {
         var engine = new GeneticSearchEngine(CreateOptions() with { GenerationCount = 1, PopulationSize = 2, RandomBaselineSize = 0, EliteCount = 0 });
