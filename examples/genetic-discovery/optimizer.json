@@ -21,6 +21,8 @@
     "maximum-drawdown": 0.08,
     "allowed-timeframes": "Daily,Hour",
     "symbols": "SPY,QQQ,IWM",
+    "universe-mode": "Configured",
+    "universe-size": 20,
     "maximum-correlation": 0.80,
     "maximum-portfolio-drawdown": 0.08,
     "validation-finalist-count": 2,

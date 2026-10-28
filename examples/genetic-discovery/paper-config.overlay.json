@@ -32,6 +32,8 @@
     "discovery.reevaluation-interval-days": "30",
     "discovery.max-negative-review-periods": "3",
     "discovery.symbols": "SPY|QQQ|IWM",
+    "discovery.universe-mode": "Configured",
+    "discovery.universe-size": "20",
     "discovery.kill-switch-file": "emergency-stop"
   }
 }

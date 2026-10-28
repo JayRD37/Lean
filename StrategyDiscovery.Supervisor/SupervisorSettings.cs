@@ -127,6 +127,19 @@ public sealed class SupervisorSettings
             .Select(value => value.ToUpperInvariant()).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         if (!optimizerSymbols.SequenceEqual(paperSymbols, StringComparer.Ordinal))
             throw new InvalidDataException("Optimizer and paper symbol universes must match exactly.");
+        var optimizerUniverseMode = optimizerSettings["universe-mode"]?.Value<string>() ?? "Configured";
+        var paperUniverseMode = paperParameters["discovery.universe-mode"]?.Value<string>() ?? "Configured";
+        if (!string.Equals(optimizerUniverseMode, "Configured", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(optimizerUniverseMode, "TopDollarVolume", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("universe-mode must be Configured or TopDollarVolume.");
+        if (!string.Equals(optimizerUniverseMode, paperUniverseMode, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Optimizer and paper universe modes must match.");
+        var optimizerUniverseSize = optimizerSettings["universe-size"]?.Value<int>() ?? 20;
+        var paperUniverseSize = ParseInt(paperParameters["discovery.universe-size"]) ?? 20;
+        if (optimizerUniverseSize is < 1 or > 100 || paperUniverseSize is < 1 or > 100)
+            throw new InvalidDataException("universe-size must be between one and one hundred in optimizer and paper settings.");
+        if (optimizerUniverseSize != paperUniverseSize)
+            throw new InvalidDataException("Optimizer and paper universe sizes must match.");
         if (MaximumValidationDrawdown > ParseDouble(paperParameters["discovery.max-drawdown"]))
             throw new InvalidDataException("maximum-validation-drawdown cannot exceed the live paper drawdown limit.");
     }

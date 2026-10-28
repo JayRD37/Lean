@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5, [string] $UniverseMode = 'Configured', [int] $UniverseSize = 20) {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -46,6 +46,8 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
         'discovery.train-start' = $StartDate
         'discovery.train-end' = $EndDate
         'discovery.symbols' = $Symbol
+        'discovery.universe-mode' = $UniverseMode
+        'discovery.universe-size' = [string]$UniverseSize
         'discovery.timeframe' = $Timeframe
         'discovery.confirmation-timeframe' = $ConfirmationTimeframe
         'discovery.family' = 'TrendFollowing'
@@ -163,6 +165,8 @@ $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $costStress = Run-Backtest 'cost-stress' '2019-01-01' '2021-02-15' 'SPY' 'Daily' 'None' 1 50 0.85 $false 200
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
+$pointInTimeUniverseShort = Run-Backtest 'point-in-time-universe-prefix' '2014-03-24' '2014-04-03' 'SPY' 'Daily' 'None' 3 60 0.99 $true 5 'TopDollarVolume' 3
+$pointInTimeUniverse = Run-Backtest 'point-in-time-universe' '2014-03-24' '2014-04-07' 'SPY' 'Daily' 'None' 3 60 0.99 $true 5 'TopDollarVolume' 3
 $multiAssetShort = Run-Backtest 'multi-asset-prefix' '2019-01-01' '2021-02-15' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiAsset = Run-Backtest 'multi-asset' '2019-01-01' '2021-03-31' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiShort = Run-Backtest 'multi-prefix' '2020-01-02' '2021-02-15' 'SPY' 'Hour' 'Daily'
@@ -174,6 +178,9 @@ $multiShortOrders = @(Get-NormalizedOrders $multiShort.Result $through)
 $multiLongOrders = @(Get-NormalizedOrders $multiLong.Result $through)
 $multiAssetShortOrders = @(Get-NormalizedOrders $multiAssetShort.Result $through)
 $multiAssetLongOrders = @(Get-NormalizedOrders $multiAsset.Result $through)
+$universeThrough = [datetime]'2014-04-02'
+$pointInTimeUniverseShortOrders = @(Get-NormalizedOrders $pointInTimeUniverseShort.Result $universeThrough)
+$pointInTimeUniverseLongOrders = @(Get-NormalizedOrders $pointInTimeUniverse.Result $universeThrough)
 $multiAssetSymbols = @((Get-NormalizedOrders $multiAsset.Result ([datetime]'2021-03-31')) | Select-Object -ExpandProperty Symbol -Unique)
 
 if ($shortOrders.Count -eq 0) { throw "Prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($short.LogPath)" }
@@ -208,6 +215,18 @@ foreach ($line in $selectionAudit) {
     if ($line -match 'grossTarget=([0-9.]+)%' -and [decimal]$Matches[1] -gt 60) { throw "Portfolio selection exceeded the 60% gross-exposure cap: $line" }
 }
 Write-Output "PASS: multi-asset LEAN backtest filled $($multiAssetSymbols.Count) tickers; every audited target respected 3 positions and 60% gross exposure."
+$universeLog = Get-Content -LiteralPath $pointInTimeUniverse.AlgorithmLogPath -Raw
+if ($universeLog -notmatch 'Point-in-time coarse universe selected [1-3] securities from [0-9]+ records') { throw "The historical coarse-data universe did not select any symbols; inspect $($pointInTimeUniverse.AlgorithmLogPath)" }
+if ($universeLog -notmatch 'Point-in-time coarse universe selected [1-3] securities from [0-9]+ records.*AAPL') { throw "The 2014 point-in-time coarse universe did not select AAPL from that date's local coarse data; inspect $($pointInTimeUniverse.AlgorithmLogPath)" }
+if ($universeLog -match 'Execution safety gate tripped') { throw "The point-in-time universe run hit the execution safety gate; inspect $($pointInTimeUniverse.AlgorithmLogPath)" }
+$selectionSets = @((($universeLog -split "`r?`n") | Where-Object { $_ -match 'Point-in-time coarse universe selected .*: (.+)$' } | ForEach-Object { $Matches[1] }) | Sort-Object -Unique)
+if ($selectionSets.Count -lt 2) { throw "The historical coarse universe did not change its selected members; inspect $($pointInTimeUniverse.AlgorithmLogPath)" }
+$universeShortJson = ConvertTo-Json -InputObject $pointInTimeUniverseShortOrders -Depth 5 -Compress
+$universeLongJson = ConvertTo-Json -InputObject $pointInTimeUniverseLongOrders -Depth 5 -Compress
+if ($pointInTimeUniverseShortOrders.Count -eq 0 -or $universeShortJson -cne $universeLongJson) { throw "Point-in-time universe fills differ between short and longer histories through $($universeThrough.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
+$universeFilledSymbols = @((Get-NormalizedOrders $pointInTimeUniverse.Result ([datetime]'2014-04-07')) | Select-Object -ExpandProperty Symbol -Unique)
+if (@($universeFilledSymbols | Where-Object { $_ -ne 'SPY' }).Count -eq 0) { throw "The point-in-time universe run did not fill an order for a dynamically selected security; inspect $($pointInTimeUniverse.AlgorithmLogPath)" }
+Write-Output "PASS: $($pointInTimeUniverseShortOrders.Count) fills from the point-in-time universe matched through $($universeThrough.ToString('yyyy-MM-dd')); LEAN filled dynamic security symbols ($($universeFilledSymbols -join ','))."
 $actionsLog = Get-Content -LiteralPath $corporateActions.AlgorithmLogPath -Raw
 if ($actionsLog -notmatch 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25') { throw "LEAN did not deliver AAPL's 2020 four-for-one split event; inspect $($corporateActions.AlgorithmLogPath)" }
 $splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25' } | Select-Object -Last 1

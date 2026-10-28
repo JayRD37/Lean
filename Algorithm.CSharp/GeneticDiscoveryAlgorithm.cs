@@ -8,6 +8,7 @@ using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
+using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Genetic;
 using QuantConnect.Indicators;
 using QuantConnect.Orders;
@@ -24,6 +25,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 {
     private const int CorrelationWindow = 60;
     private readonly Dictionary<Symbol, SymbolState> _symbols = new();
+    private readonly HashSet<Symbol> _managedSymbols = new();
+    private readonly HashSet<Symbol> _anchorSymbols = new();
     private readonly BrokerageSafetyGate _brokerageSafety = new();
     private StrategyFamily _family;
     private Resolution _resolution;
@@ -41,6 +44,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private string _killSwitchFile;
     private bool _shutdownRequested;
     private bool _auditPortfolioSelection;
+    private bool _useTopDollarVolumeUniverse;
+    private int _universeSize;
     private PortfolioDrawdownGuard _drawdownGuard = null!;
     private StrategyLifecycleMonitor _lifecycleMonitor;
     private StrategyLifecycleOptions _lifecycleOptions;
@@ -68,6 +73,11 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _maximumCorrelation = GetParameter("discovery.max-correlation", 0.85d);
         _maximumPortfolioDrawdown = GetParameter("discovery.max-drawdown", 0.10d);
         _auditPortfolioSelection = string.Equals(GetParameter("discovery.audit-portfolio-selection", "false"), "true", StringComparison.OrdinalIgnoreCase);
+        var universeMode = GetParameter("discovery.universe-mode", "Configured");
+        _useTopDollarVolumeUniverse = string.Equals(universeMode, "TopDollarVolume", StringComparison.OrdinalIgnoreCase);
+        if (!_useTopDollarVolumeUniverse && !string.Equals(universeMode, "Configured", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("discovery.universe-mode must be Configured or TopDollarVolume.");
+        _universeSize = GetParameter("discovery.universe-size", 20);
         _killSwitchFile = GetParameter("discovery.kill-switch-file", "emergency-stop");
 
         ValidateGenome();
@@ -104,15 +114,14 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         foreach (var ticker in symbols)
         {
             var symbol = AddEquity(ticker, _resolution, leverage: 1m).Symbol;
-            var state = new SymbolState(symbol, SMA(symbol, _fastPeriod), SMA(symbol, _slowPeriod), STD(symbol, _slowPeriod));
-            if (_confirmationResolution is { } confirmationResolution)
-            {
-                state.SetConfirmationIndicators(
-                    SMA(symbol, _fastPeriod, confirmationResolution),
-                    SMA(symbol, _slowPeriod, confirmationResolution),
-                    STD(symbol, _slowPeriod, confirmationResolution));
-            }
-            _symbols.Add(symbol, state);
+            _anchorSymbols.Add(symbol);
+            AddSymbolState(symbol, warmUp: false);
+        }
+        if (_useTopDollarVolumeUniverse)
+        {
+            UniverseSettings.Resolution = _resolution;
+            UniverseSettings.Leverage = 1m;
+            AddUniverse(SelectTopDollarVolume);
         }
 
         var warmupResolution = _confirmationResolution ?? _resolution;
@@ -145,7 +154,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             _shutdownRequested = true;
             if (!_brokerageSafety.CanLiquidate) return;
             LiquidateManagedPositions("emergency shutdown");
-            if (_symbols.Keys.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
+            if (_managedSymbols.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
             return;
         }
 
@@ -248,6 +257,26 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         Debug("Brokerage disconnected; new strategy orders are paused until reconnection.");
     }
 
+    public override void OnSecuritiesChanged(SecurityChanges changes)
+    {
+        foreach (var security in changes.AddedSecurities)
+        {
+            if (_anchorSymbols.Contains(security.Symbol)) continue;
+            AddSymbolState(security.Symbol, warmUp: true);
+        }
+
+        foreach (var security in changes.RemovedSecurities)
+        {
+            if (_anchorSymbols.Contains(security.Symbol)) continue;
+            if (Portfolio[security.Symbol].Invested)
+            {
+                Liquidate(security.Symbol, tag: "point-in-time universe removal");
+            }
+            _symbols.Remove(security.Symbol);
+            if (!Portfolio[security.Symbol].Invested) _managedSymbols.Remove(security.Symbol);
+        }
+    }
+
     public override void OnBrokerageReconnect()
     {
         _brokerageSafety.Reconnect();
@@ -295,9 +324,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     private PortfolioRiskBudget GetAccountRiskBudget()
     {
-        var managedSymbols = _symbols.Keys.ToHashSet();
         var externalHoldings = Portfolio.Values
-            .Where(holding => holding.Invested && !managedSymbols.Contains(holding.Symbol))
+            .Where(holding => holding.Invested && !_managedSymbols.Contains(holding.Symbol))
             .Select(holding => holding.AbsoluteHoldingsValue);
         return PortfolioRiskBudget.Calculate(
             _maxPositions,
@@ -308,10 +336,56 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     private void LiquidateManagedPositions(string tag)
     {
-        foreach (var symbol in _symbols.Keys)
+        foreach (var symbol in _managedSymbols)
         {
             if (Portfolio[symbol].Invested) Liquidate(symbol, tag: tag);
         }
+    }
+
+    private void AddSymbolState(Symbol symbol, bool warmUp)
+    {
+        if (_symbols.ContainsKey(symbol)) return;
+        var state = new SymbolState(symbol, SMA(symbol, _fastPeriod), SMA(symbol, _slowPeriod), STD(symbol, _slowPeriod));
+        if (_confirmationResolution is { } confirmationResolution)
+        {
+            state.SetConfirmationIndicators(
+                SMA(symbol, _fastPeriod, confirmationResolution),
+                SMA(symbol, _slowPeriod, confirmationResolution),
+                STD(symbol, _slowPeriod, confirmationResolution));
+        }
+        _symbols.Add(symbol, state);
+        _managedSymbols.Add(symbol);
+        if (!warmUp) return;
+
+        WarmUpIndicator(symbol, state.Fast, _resolution);
+        WarmUpIndicator(symbol, state.Slow, _resolution);
+        WarmUpIndicator(symbol, state.Volatility, _resolution);
+        if (_confirmationResolution is { } resolution && state.ConfirmationFast is not null)
+        {
+            WarmUpIndicator(symbol, state.ConfirmationFast, resolution);
+            WarmUpIndicator(symbol, state.ConfirmationSlow!, resolution);
+            WarmUpIndicator(symbol, state.ConfirmationVolatility!, resolution);
+        }
+        foreach (var bar in History<TradeBar>(symbol, CorrelationWindow + 1, _resolution))
+        {
+            state.UpdateReturns(bar.EndTime, (double)bar.Close);
+        }
+    }
+
+    private IEnumerable<Symbol> SelectTopDollarVolume(IEnumerable<CoarseFundamental> coarse)
+    {
+        var records = coarse.ToArray();
+        var selected = records
+            .Where(item => item.Price >= 5m && item.DollarVolume >= 25_000_000d && !_anchorSymbols.Contains(item.Symbol))
+            .OrderByDescending(item => item.DollarVolume)
+            .ThenBy(item => item.Symbol.Value, StringComparer.Ordinal)
+            .Take(_universeSize)
+            .Select(item => item.Symbol)
+            .ToArray();
+        var eligibleCount = records.Count(item => item.Price >= 5m && item.DollarVolume >= 25_000_000d);
+        var sample = string.Join(';', records.Take(3).Select(item => $"{item.Symbol.Value}:{item.Price}:{item.DollarVolume}"));
+        Debug($"Point-in-time coarse universe selected {selected.Length} securities from {records.Length} records ({eligibleCount} eligible; sample={sample}): {string.Join(',', selected.Select(symbol => symbol.Value))}");
+        return selected;
     }
 
     private bool ShouldShutdown()
@@ -354,6 +428,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (_entryThreshold <= _exitThreshold || _exitThreshold <= 0) throw new ArgumentException("The entry threshold must exceed the positive exit threshold.");
         if (_maxPositions is < StrategyGenome.MinMaxPositions or > StrategyGenome.MaxMaxPositions) throw new ArgumentOutOfRangeException("discovery.max-positions");
         if (_maxExposurePercent is < StrategyGenome.MinExposurePct or > StrategyGenome.MaxExposurePct) throw new ArgumentOutOfRangeException("discovery.max-exposure-percent");
+        if (_universeSize is < 1 or > 100) throw new ArgumentOutOfRangeException("discovery.universe-size");
         if (_minimumSpreadBasisPoints < 0 || _minimumSpreadBasisPoints > 500) throw new ArgumentOutOfRangeException("discovery.minimum-spread-bps");
         if (_maximumCorrelation is < 0 or > 1) throw new ArgumentOutOfRangeException("discovery.max-correlation");
         if (_maximumPortfolioDrawdown is <= 0 or >= 1) throw new ArgumentOutOfRangeException("discovery.max-drawdown");

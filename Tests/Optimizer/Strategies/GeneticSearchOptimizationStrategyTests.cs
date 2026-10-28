@@ -18,6 +18,19 @@ namespace QuantConnect.Tests.Optimizer.Strategies;
 public class GeneticSearchOptimizationStrategyTests
 {
     [Test]
+    public void SettingsValidatePointInTimeUniverseModeAndSize()
+    {
+        Assert.Throws<ArgumentException>(() => new GeneticSearchOptimizationStrategySettings
+        {
+            UniverseMode = "Unknown"
+        }.ToDiscoveryOptions());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new GeneticSearchOptimizationStrategySettings
+        {
+            UniverseSize = 101
+        }.ToDiscoveryOptions());
+    }
+
+    [Test]
     public void RunsGrowthConsistencyBaselineThenHeldOutValidationThroughLeanOptimizerContract()
     {
         var strategy = new GeneticSearchOptimizationStrategy();
@@ -38,6 +51,8 @@ public class GeneticSearchOptimizationStrategyTests
                 ValidationBaselineCount = 1,
                 ValidationWindowCount = 1,
                 ParameterRobustnessProbeCount = 0,
+                UniverseMode = "TopDollarVolume",
+                UniverseSize = 12,
                 AllowedTimeframes = "Daily"
             });
 
@@ -49,6 +64,8 @@ public class GeneticSearchOptimizationStrategyTests
         {
             Assert.That(pending.TryDequeue(out var parameterSet), Is.True);
             Assert.That(parameterSet!.Value["discovery.minimum-spread-bps"], Is.EqualTo("5"));
+            Assert.That(parameterSet.Value["discovery.universe-mode"], Is.EqualTo("TopDollarVolume"));
+            Assert.That(parameterSet.Value["discovery.universe-size"], Is.EqualTo("12"));
             strategy.PushNewResults(CreateResult(parameterSet!));
         }
 

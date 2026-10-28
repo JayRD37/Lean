@@ -165,6 +165,21 @@ public class PromotionSelectorTests
 
             File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig().Replace("SPY,QQQ,IWM", "SPY,QQQ", StringComparison.Ordinal));
             Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
+
+            File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig());
+            File.WriteAllText(Path.Combine(directory, "overlay.json"), PaperOverlay().Replace("Configured", "TopDollarVolume", StringComparison.Ordinal));
+            Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
+
+            File.WriteAllText(Path.Combine(directory, "overlay.json"), PaperOverlay().Replace("\"20\"", "\"10\"", StringComparison.Ordinal));
+            Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
+
+            File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig().Replace("\"universe-mode\": \"Configured\"", "\"universe-mode\": \"Unknown\"", StringComparison.Ordinal));
+            File.WriteAllText(Path.Combine(directory, "overlay.json"), PaperOverlay().Replace("\"discovery.universe-mode\": \"Configured\"", "\"discovery.universe-mode\": \"Unknown\"", StringComparison.Ordinal));
+            Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
+
+            File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig().Replace("\"universe-size\": 20", "\"universe-size\": 101", StringComparison.Ordinal));
+            File.WriteAllText(Path.Combine(directory, "overlay.json"), PaperOverlay().Replace("\"discovery.universe-size\": \"20\"", "\"discovery.universe-size\": \"101\"", StringComparison.Ordinal));
+            Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
         }
         finally
         {
@@ -221,7 +236,9 @@ public class PromotionSelectorTests
           "validation-baseline-count": 2,
             "maximum-correlation": 0.8,
             "maximum-portfolio-drawdown": 0.08,
-            "symbols": "SPY,QQQ,IWM"
+            "symbols": "SPY,QQQ,IWM",
+            "universe-mode": "Configured",
+            "universe-size": 20
           }
         }
         """;
@@ -234,7 +251,9 @@ public class PromotionSelectorTests
             "discovery.minimum-spread-bps": "5",
             "discovery.max-correlation": "0.80",
             "discovery.max-drawdown": "0.08",
-            "discovery.symbols": "SPY|QQQ|IWM"
+            "discovery.symbols": "SPY|QQQ|IWM",
+            "discovery.universe-mode": "Configured",
+            "discovery.universe-size": "20"
           }
         }
         """;

@@ -26,6 +26,8 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("allowed-timeframes")] public string AllowedTimeframes { get; set; } = "Daily,Hour";
     [JsonProperty("enable-multi-timeframe-confirmation")] public bool EnableMultiTimeframeConfirmation { get; set; } = true;
     [JsonProperty("symbols")] public string Symbols { get; set; } = "SPY,QQQ,IWM";
+    [JsonProperty("universe-mode")] public string UniverseMode { get; set; } = "Configured";
+    [JsonProperty("universe-size")] public int UniverseSize { get; set; } = 20;
     [JsonProperty("maximum-correlation")] public double MaximumCorrelation { get; set; } = 0.85;
     [JsonProperty("maximum-portfolio-drawdown")] public double MaximumPortfolioDrawdown { get; set; } = 0.10;
     [JsonProperty("validation-finalist-count")] public int ValidationFinalistCount { get; set; } = 2;
@@ -71,6 +73,12 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         {
             throw new ArgumentException("At least one US equity ticker must be configured.", nameof(Symbols));
         }
+        if (!string.Equals(UniverseMode, "Configured", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(UniverseMode, "TopDollarVolume", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("UniverseMode must be Configured or TopDollarVolume.", nameof(UniverseMode));
+        }
+        if (UniverseSize is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(UniverseSize), "UniverseSize must be between one and one hundred.");
         if (!double.IsFinite(MaximumCorrelation) || MaximumCorrelation is < 0 or > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(MaximumCorrelation), "MaximumCorrelation must be between zero and one.");

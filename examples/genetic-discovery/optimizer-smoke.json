@@ -19,6 +19,8 @@
     "monte-carlo-simulation-count": 1000,
     "allowed-timeframes": "Daily",
     "symbols": "SPY",
+    "universe-mode": "Configured",
+    "universe-size": 20,
     "maximum-correlation": 0.85,
     "maximum-portfolio-drawdown": 0.5,
     "validation-finalist-count": 1,
