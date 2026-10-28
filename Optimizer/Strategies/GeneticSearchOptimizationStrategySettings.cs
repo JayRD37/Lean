@@ -38,6 +38,8 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("training-end-date")] public string TrainingEndDate { get; set; } = "2022-12-31";
     [JsonProperty("validation-start-date")] public string ValidationStartDate { get; set; } = "2023-01-01";
     [JsonProperty("validation-end-date")] public string ValidationEndDate { get; set; } = "2024-12-31";
+    [JsonProperty("confirmation-start-date")] public string ConfirmationStartDate { get; set; } = "2025-01-01";
+    [JsonProperty("confirmation-end-date")] public string ConfirmationEndDate { get; set; } = "2025-12-31";
 
     public StrategyDiscoveryOptions ToDiscoveryOptions()
     {
@@ -98,9 +100,12 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         var trainingEnd = DateOnly.ParseExact(TrainingEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var validationStart = DateOnly.ParseExact(ValidationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var validationEnd = DateOnly.ParseExact(ValidationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-        if (trainingStart >= trainingEnd || validationStart >= validationEnd || trainingEnd >= validationStart)
+        var confirmationStart = DateOnly.ParseExact(ConfirmationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var confirmationEnd = DateOnly.ParseExact(ConfirmationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (trainingStart >= trainingEnd || validationStart >= validationEnd || confirmationStart >= confirmationEnd ||
+            trainingEnd >= validationStart || validationEnd >= confirmationStart)
         {
-            throw new ArgumentException("Training dates must be ordered before the disjoint validation date range.");
+            throw new ArgumentException("Training, validation, and final confirmation dates must be ordered and disjoint.");
         }
         _ = WalkForwardWindow.Split(validationStart, validationEnd, ValidationWindowCount);
 
@@ -111,6 +116,11 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         DateOnly.ParseExact(ValidationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
         DateOnly.ParseExact(ValidationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
         ValidationWindowCount);
+
+    public WalkForwardWindow GetConfirmationWindow() => new(
+        0,
+        DateOnly.ParseExact(ConfirmationStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        DateOnly.ParseExact(ConfirmationEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture));
 
     public string SymbolsForParameterSet => string.Join('|', Symbols
         .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)

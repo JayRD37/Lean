@@ -34,6 +34,10 @@ public class PromotionSelectorTests
                         Window(Genome(9, 36, 11, 3, 3, 40), 20, 0.04)),
                     Candidate(2, 1.5, Genome(8, 35, 10, 3, 4, 30), 0, 0,
                         Window(Genome(8, 35, 10, 3, 4, 30), 20, 0.04))
+                },
+                ["confirmation"] = new JArray
+                {
+                    Confirmation(center, 0.75, 15, 0.07)
                 }
             };
             var rankingsPath = Path.Combine(directory, "rankings.json");
@@ -49,7 +53,7 @@ public class PromotionSelectorTests
 
             Assert.That(selected.Population, Is.EqualTo(StrategyPopulation.Growth));
             Assert.That(selected.Genome.FastPeriod, Is.EqualTo(10));
-            Assert.That(selected.Fitness, Is.EqualTo(0.7));
+            Assert.That(selected.Fitness, Is.EqualTo(0.75));
             Assert.That(selected.ValidationWindowCount, Is.EqualTo(1));
         }
         finally
@@ -76,8 +80,44 @@ public class PromotionSelectorTests
                 ["validation"] = new JArray
                 {
                     Candidate(0, 0.7, genome, 1, 1, Window(genome, 15, 0.06))
-                }
+                },
+                ["confirmation"] = new JArray { Confirmation(genome, 0.9, 15, 0.06) }
             };
+            var path = Path.Combine(directory, "rankings.json");
+            File.WriteAllText(path, rankings.ToString(Formatting.Indented));
+
+            Assert.Throws<InvalidDataException>(() => PromotionSelector.SelectBest(path, new SupervisorSettings
+            {
+                MinimumRobustnessAdjustedFitness = 0.1,
+                MinimumValidationTradesPerWindow = 10,
+                MaximumValidationDrawdown = 0.10
+            }));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
+    public void PromotionRejectsWalkForwardWinnerWithoutPassingUntouchedConfirmation()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "LeanGeneticSupervisorTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var genome = Genome(10, 40, 12, 4, 3, 30);
+            var rankings = new JObject
+            {
+                ["randomizedBaselineComparison"] = new JObject
+                {
+                    ["baselineValidationCount"] = 2,
+                    ["medianBaselineFitness"] = 0.6
+                },
+                ["validation"] = new JArray { Candidate(0, 0.8, genome, 1, 1, Window(genome, 15, 0.06)) },
+                ["confirmation"] = new JArray { Confirmation(genome, 0.9, 15, 0.06) }
+            };
+            ((JObject)rankings["confirmation"]![0]!)["Passed"] = false;
             var path = Path.Combine(directory, "rankings.json");
             File.WriteAllText(path, rankings.ToString(Formatting.Indented));
 
@@ -310,6 +350,14 @@ public class PromotionSelectorTests
         ["RobustnessAdjustedFitness"] = fitness,
         ["ParameterRobustness"] = new JObject { ["RequestedProbeCount"] = requested, ["ValidProbeCount"] = valid },
         ["Windows"] = new JArray(windows)
+    };
+
+    private static JObject Confirmation(JObject genome, double fitness, int trades, double drawdown) => new()
+    {
+        ["Genome"] = genome.DeepClone(),
+        ["ConfirmationFitness"] = fitness,
+        ["Metrics"] = new JObject { ["TradeCount"] = trades, ["Drawdown"] = drawdown },
+        ["Passed"] = true
     };
 }
 

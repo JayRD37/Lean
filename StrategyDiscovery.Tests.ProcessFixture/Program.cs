@@ -56,6 +56,16 @@ if (args.Length == 2 && args[0] == "--config")
                         }
                     }
                 }
+            },
+            ["confirmation"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["Passed"] = true,
+                    ["Genome"] = genome.DeepClone(),
+                    ["ConfirmationFitness"] = 0.5,
+                    ["Metrics"] = new JsonObject { ["TradeCount"] = 20, ["Drawdown"] = 0.05 }
+                }
             }
         };
         File.WriteAllText(Path.Combine(resultsDirectory, "genetic-search-rankings.json"), rankings.ToJsonString());

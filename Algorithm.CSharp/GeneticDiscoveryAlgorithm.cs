@@ -99,12 +99,13 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (!LiveMode)
         {
             var phase = GetParameter("discovery.phase", "Training");
-            var startText = string.Equals(phase, "Validation", StringComparison.OrdinalIgnoreCase)
-                ? GetParameter("discovery.validation-start", "2023-01-01")
-                : GetParameter("discovery.train-start", "2018-01-01");
-            var endText = string.Equals(phase, "Validation", StringComparison.OrdinalIgnoreCase)
-                ? GetParameter("discovery.validation-end", "2024-12-31")
-                : GetParameter("discovery.train-end", "2022-12-31");
+            var isTraining = string.Equals(phase, "Training", StringComparison.OrdinalIgnoreCase);
+            var startText = isTraining
+                ? GetParameter("discovery.train-start", "2018-01-01")
+                : GetParameter("discovery.validation-start", "2023-01-01");
+            var endText = isTraining
+                ? GetParameter("discovery.train-end", "2022-12-31")
+                : GetParameter("discovery.validation-end", "2024-12-31");
             SetStartDate(ParseDate(startText));
             SetEndDate(ParseDate(endText));
             SetCash(100_000);

@@ -12,6 +12,8 @@ public static class PromotionSelector
         var root = JObjectConfig.Read(rankingsPath);
         var validation = root["validation"] as JArray
             ?? throw new InvalidDataException("Rankings file has no validation results.");
+        var confirmation = root["confirmation"] as JArray
+            ?? throw new InvalidDataException("Rankings file has no untouched confirmation results.");
         var baseline = root["randomizedBaselineComparison"] as JObject
             ?? throw new InvalidDataException("Rankings file has no randomized baseline comparison.");
         var baselineCount = baseline["baselineValidationCount"]?.Value<int>() ?? 0;
@@ -52,13 +54,26 @@ public static class PromotionSelector
                 continue;
             }
 
-            candidates.Add(new PromotedStrategy(genome, fitness.Value, population, centralWindows.Length));
+            var confirmationResult = confirmation.OfType<JObject>().FirstOrDefault(item =>
+                item["Passed"]?.Value<bool>() == true && JToken.DeepEquals(item["Genome"], genomeToken));
+            var confirmationFitness = confirmationResult?["ConfirmationFitness"]?.Value<double>();
+            var confirmationMetrics = confirmationResult?["Metrics"] as JObject;
+            if (confirmationFitness is null || !double.IsFinite(confirmationFitness.Value) ||
+                confirmationFitness.Value < settings.MinimumRobustnessAdjustedFitness ||
+                confirmationMetrics is null ||
+                (confirmationMetrics["TradeCount"]?.Value<int>() ?? -1) < settings.MinimumValidationTradesPerWindow ||
+                (confirmationMetrics["Drawdown"]?.Value<double>() ?? double.PositiveInfinity) > settings.MaximumValidationDrawdown)
+            {
+                continue;
+            }
+
+            candidates.Add(new PromotedStrategy(genome, confirmationFitness.Value, population, centralWindows.Length));
         }
 
         return candidates
             .OrderByDescending(candidate => candidate.Fitness)
             .ThenBy(candidate => candidate.Genome.FastPeriod)
             .FirstOrDefault()
-            ?? throw new InvalidDataException("No evolved candidate passed randomized-baseline, validation, robustness, trade-count, and drawdown promotion gates.");
+            ?? throw new InvalidDataException("No evolved candidate passed randomized-baseline, walk-forward validation, robustness, untouched confirmation, trade-count, and drawdown promotion gates.");
     }
 }

@@ -32,7 +32,9 @@
     "training-start-date": "2018-01-01",
     "training-end-date": "2022-12-31",
     "validation-start-date": "2023-01-01",
-    "validation-end-date": "2024-12-31"
+    "validation-end-date": "2024-12-31",
+    "confirmation-start-date": "2025-01-01",
+    "confirmation-end-date": "2025-12-31"
   },
   "optimization-criterion": {
     "target": "Statistics.Sharpe Ratio",

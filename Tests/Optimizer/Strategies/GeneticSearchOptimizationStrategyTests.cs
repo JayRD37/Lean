@@ -28,6 +28,10 @@ public class GeneticSearchOptimizationStrategyTests
         {
             UniverseSize = 101
         }.ToDiscoveryOptions());
+        Assert.Throws<ArgumentException>(() => new GeneticSearchOptimizationStrategySettings
+        {
+            ConfirmationStartDate = "2024-12-31"
+        }.ToDiscoveryOptions());
     }
 
     [Test]
@@ -58,7 +62,7 @@ public class GeneticSearchOptimizationStrategyTests
 
         strategy.PushNewResults(OptimizationResult.Initial);
         Assert.That(pending, Has.Count.EqualTo(5));
-        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(8));
+        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(9));
 
         for (var index = 0; index < 5; index++)
         {
@@ -71,12 +75,20 @@ public class GeneticSearchOptimizationStrategyTests
 
         Assert.That(pending, Has.Count.EqualTo(3));
         Assert.That(pending.Select(item => item.Value["discovery.phase"]), Is.All.EqualTo("Validation"));
-        while (pending.TryDequeue(out var parameterSet)) strategy.PushNewResults(CreateResult(parameterSet!));
+        for (var index = 0; index < 3; index++) strategy.PushNewResults(CreateResult(pending.Dequeue()));
+
+        Assert.That(pending, Has.Count.EqualTo(1));
+        Assert.That(pending.Peek().Value["discovery.phase"], Is.EqualTo("Confirmation"));
+        Assert.That(pending.Peek().Value["discovery.validation-start"], Is.EqualTo("2025-01-01"));
+        Assert.That(strategy.Solution, Is.Null);
+        strategy.PushNewResults(CreateResult(pending.Dequeue()));
 
         Assert.That(strategy.Solution, Is.Not.Null);
-        Assert.That(strategy.Solution.ParameterSet.Value["discovery.phase"], Is.EqualTo("Validation"));
+        Assert.That(strategy.Solution.ParameterSet.Value["discovery.phase"], Is.EqualTo("Confirmation"));
+        Assert.That(strategy.Solution.ParameterSet.Value["discovery.population"], Is.Not.EqualTo(nameof(StrategyPopulation.RandomBaseline)));
         Assert.That(strategy.Solution.ParameterSet.Value["discovery.train-end"], Is.EqualTo("2022-12-31"));
-        Assert.That(strategy.Solution.ParameterSet.Value["discovery.validation-start"], Is.EqualTo("2023-01-01"));
+        Assert.That(strategy.Solution.ParameterSet.Value["discovery.confirmation-start"], Is.EqualTo("2025-01-01"));
+        Assert.That(strategy.Solution.ParameterSet.Value["discovery.validation-start"], Is.EqualTo("2025-01-01"));
     }
 
     [Test]
@@ -110,7 +122,7 @@ public class GeneticSearchOptimizationStrategyTests
             strategy.PushNewResults(CreateResult(training!));
         }
 
-        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(14));
+        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(15));
         Assert.That(pending, Has.Count.EqualTo(9));
         var firstFinalistWindows = new List<(string Start, string End)>();
         for (var index = 0; index < 3; index++)
@@ -126,7 +138,12 @@ public class GeneticSearchOptimizationStrategyTests
         Assert.That(DateOnly.Parse(firstFinalistWindows[0].End).AddDays(1), Is.EqualTo(DateOnly.Parse(firstFinalistWindows[1].Start)));
         Assert.That(DateOnly.Parse(firstFinalistWindows[1].End).AddDays(1), Is.EqualTo(DateOnly.Parse(firstFinalistWindows[2].Start)));
         Assert.That(firstFinalistWindows[^1].End, Is.EqualTo("2024-12-31"));
+        Assert.That(strategy.Solution, Is.Null);
+        for (var index = 0; index < 6; index++) strategy.PushNewResults(CreateResult(pending.Dequeue()));
+        Assert.That(pending, Has.Count.EqualTo(1));
+        strategy.PushNewResults(CreateResult(pending.Dequeue()));
         Assert.That(strategy.Solution, Is.Not.Null);
+        Assert.That(strategy.Solution.ParameterSet.Value["discovery.phase"], Is.EqualTo("Confirmation"));
     }
 
     [Test]
@@ -160,7 +177,7 @@ public class GeneticSearchOptimizationStrategyTests
             strategy.PushNewResults(CreateResult(training!));
         }
 
-        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(12));
+        Assert.That(strategy.GetTotalBacktestEstimate(), Is.EqualTo(13));
         Assert.That(pending, Has.Count.EqualTo(7));
         var firstFinalist = new List<ParameterSet>();
         for (var index = 0; index < 3; index++)
@@ -171,6 +188,10 @@ public class GeneticSearchOptimizationStrategyTests
             if (index < 2) Assert.That(strategy.Solution, Is.Null);
         }
         Assert.That(firstFinalist.Select(candidate => candidate.Value["discovery.fast-period"]).Distinct().Count(), Is.GreaterThan(1));
+        Assert.That(strategy.Solution, Is.Null);
+        for (var index = 0; index < 4; index++) strategy.PushNewResults(CreateResult(pending.Dequeue()));
+        Assert.That(pending, Has.Count.EqualTo(1));
+        strategy.PushNewResults(CreateResult(pending.Dequeue()));
         Assert.That(strategy.Solution, Is.Not.Null);
     }
 
@@ -204,6 +225,41 @@ public class GeneticSearchOptimizationStrategyTests
 
         Assert.That(strategy.Solution, Is.Null);
         Assert.That(pending, Is.Empty);
+    }
+
+    [Test]
+    public void ConfirmationMustPassTradeCountGateBeforeItCanBecomeTheSolution()
+    {
+        var strategy = new GeneticSearchOptimizationStrategy();
+        var pending = new Queue<ParameterSet>();
+        strategy.NewParameterSet += (_, parameterSet) => pending.Enqueue(parameterSet);
+        strategy.Initialize(
+            new Target("Statistics.Sharpe Ratio", new Maximization(), null),
+            Array.Empty<Constraint>(),
+            new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+            new GeneticSearchOptimizationStrategySettings
+            {
+                PopulationSize = 2,
+                GenerationCount = 1,
+                RandomBaselineSize = 0,
+                EliteCount = 0,
+                TournamentSize = 1,
+                ValidationFinalistCount = 1,
+                ValidationBaselineCount = 0,
+                ValidationWindowCount = 1,
+                ParameterRobustnessProbeCount = 0,
+                AllowedTimeframes = "Daily"
+            });
+
+        strategy.PushNewResults(OptimizationResult.Initial);
+        for (var index = 0; index < 4; index++) strategy.PushNewResults(CreateResult(pending.Dequeue()));
+        for (var index = 0; index < 2; index++) strategy.PushNewResults(CreateResult(pending.Dequeue()));
+        Assert.That(pending, Has.Count.EqualTo(1));
+        Assert.That(pending.Peek().Value["discovery.phase"], Is.EqualTo("Confirmation"));
+
+        strategy.PushNewResults(CreateResult(pending.Dequeue(), tradeCount: 0));
+
+        Assert.That(strategy.Solution, Is.Null);
     }
 
     [Test]
@@ -273,7 +329,7 @@ public class GeneticSearchOptimizationStrategyTests
         }.ToDiscoveryOptions());
     }
 
-    private static OptimizationResult CreateResult(ParameterSet parameterSet)
+    private static OptimizationResult CreateResult(ParameterSet parameterSet, int tradeCount = 20)
     {
         var result = new
         {
@@ -283,12 +339,12 @@ public class GeneticSearchOptimizationStrategyTests
                 ["Sharpe Ratio"] = parameterSet.Value["discovery.fast-period"],
                 ["Drawdown"] = "5.0%",
                 ["Win Rate"] = "55.0%",
-                ["Total Trades"] = "20",
+                ["Total Trades"] = tradeCount.ToString(),
                 ["Net Profit"] = "18.0%"
             },
             totalPerformance = new
             {
-                tradeStatistics = new { totalNumberOfTrades = 20 },
+                tradeStatistics = new { totalNumberOfTrades = tradeCount },
                 closedTrades = new[]
                 {
                     new { profitLoss = 20d, entryPrice = 100d, quantity = 2d },

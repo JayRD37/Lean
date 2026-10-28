@@ -50,7 +50,7 @@ public static class PaperConfigFactory
             config["parameters"] = parameters;
         }
         parameters["discovery.allow-paper-trading"] = "true";
-        parameters["discovery.phase"] = "Validation";
+        parameters["discovery.phase"] = "Confirmation";
         parameters["discovery.family"] = strategy.Genome.Family.ToString();
         parameters["discovery.timeframe"] = strategy.Genome.Timeframe.ToString();
         parameters["discovery.confirmation-timeframe"] = strategy.Genome.ConfirmationTimeframe?.ToString() ?? "None";

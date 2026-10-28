@@ -24,6 +24,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
     private readonly Dictionary<int, PendingCandidate> _candidates = new();
     private readonly HashSet<int> _validationPending = new();
     private readonly List<ValidationRecord> _validationRecords = new();
+    private readonly List<ConfirmationRecord> _confirmationRecords = new();
     private readonly Dictionary<int, ValidationGroup> _validationGroups = new();
     private GeneticSearchEngine _engine;
     private GeneticSearchOptimizationStrategySettings _settings;
@@ -32,6 +33,9 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
     private string _historyFile;
     private bool _initialized;
     private double _solutionFitness = GeneticSearchEngine.InvalidFitness;
+    private int _nextCandidateId;
+    private ValidationRecord _selectedValidationRecord;
+    private OptimizationResult _selectedValidationResult;
 
     public event EventHandler<ParameterSet> NewParameterSet;
     public OptimizationResult Solution { get; private set; }
@@ -81,8 +85,33 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 if (_engine.IsComplete)
                 {
                     PublishValidationBatch();
-                    if (_validationPending.Count == 0) PersistRankings();
+                    if (_validationPending.Count == 0) CompleteValidation();
                 }
+                return;
+            }
+
+            if (candidate.Phase == EvaluationPhase.Confirmation)
+            {
+                var fitness = metrics is null
+                    ? GeneticSearchEngine.InvalidFitness
+                    : GeneticSearchEngine.Score(metrics, candidate.SourcePopulation, _settings.MinimumTrades, _settings.MaximumDrawdown);
+                var constraintsMet = metrics is not null && _constraints.All(constraint => constraint.IsMet(result.JsonBacktestResult));
+                var confirmation = new ConfirmationRecord(
+                    candidate.Candidate.Genome,
+                    candidate.SourcePopulation,
+                    candidate.TrainingFitness,
+                    fitness,
+                    metrics,
+                    result.BacktestId,
+                    constraintsMet && fitness > GeneticSearchEngine.InvalidFitness);
+                _confirmationRecords.Add(confirmation);
+                if (confirmation.Passed && _target.MoveAhead(result.JsonBacktestResult))
+                {
+                    Solution = result;
+                    _solutionFitness = fitness;
+                    _target.CheckCompliance();
+                }
+                PersistRankings();
                 return;
             }
 
@@ -124,6 +153,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 var latestResult = centralFolds[^1].Result;
                 _validationRecords.Add(new ValidationRecord(
                     group.Population,
+                    group.Generation,
                     group.Genome,
                     group.TrainingFitness,
                     validationFitness,
@@ -132,14 +162,16 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                     robustness,
                     orderedFolds.Select(fold => new ValidationWindowRecord(fold.Genome, fold.Window, fold.Metrics, fold.Fitness, fold.Result.BacktestId)).ToArray()));
 
-                if (completeAndConstrained && robustnessAdjustedFitness > _solutionFitness && _target.MoveAhead(latestResult.JsonBacktestResult))
+                var record = _validationRecords[^1];
+                if (group.Population != StrategyPopulation.RandomBaseline &&
+                    completeAndConstrained && robustnessAdjustedFitness > _solutionFitness)
                 {
-                    Solution = latestResult;
                     _solutionFitness = robustnessAdjustedFitness;
-                    _target.CheckCompliance();
+                    _selectedValidationRecord = record;
+                    _selectedValidationResult = latestResult;
                 }
             }
-            if (_validationPending.Count == 0) PersistRankings();
+            if (_validationPending.Count == 0) CompleteValidation();
         }
     }
 
@@ -148,7 +180,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         : checked(_settings.ToDiscoveryOptions().EstimateBacktests() +
             ((_settings.ValidationFinalistCount * 2 * (1 + _settings.ParameterRobustnessProbeCount)) +
              (_settings.ValidationBaselineCount == 0 ? 0 : Math.Min(_settings.ValidationBaselineCount, _settings.RandomBaselineSize))) *
-            _settings.ValidationWindowCount);
+            _settings.ValidationWindowCount + 1);
 
     private void Publish(IReadOnlyList<DiscoveryCandidate> candidates, EvaluationPhase phase)
     {
@@ -196,6 +228,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         var finalists = new List<ScoredGenome>();
         var results = _engine.Results.Where(result => result.Fitness > GeneticSearchEngine.InvalidFitness).ToArray();
         var nextId = results.Select(result => result.CandidateId).DefaultIfEmpty(0).Max() + 1;
+        _nextCandidateId = nextId;
         var windows = _settings.GetValidationWindows();
 
         foreach (var population in new[] { StrategyPopulation.Growth, StrategyPopulation.Consistency })
@@ -220,7 +253,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                     _settings.ToDiscoveryOptions().AllowedTimeframes);
             var variants = new[] { finalist.Genome }.Concat(probeGenomes).ToArray();
             var groupId = nextId++;
-            var group = new ValidationGroup(finalist.Population, finalist.Genome, finalist.Fitness, finalist.Metrics, probeGenomes, windows.Count);
+            var group = new ValidationGroup(finalist.Population, finalist.Generation, finalist.Genome, finalist.Fitness, finalist.Metrics, probeGenomes, windows.Count);
             _validationGroups.Add(groupId, group);
             foreach (var variant in variants)
             {
@@ -240,6 +273,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 }
             }
         }
+        _nextCandidateId = nextId;
     }
 
     private void PublishOne(DiscoveryCandidate candidate, EvaluationPhase phase, WalkForwardWindow? window = null)
@@ -269,6 +303,8 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             ["discovery.train-end"] = _settings.TrainingEndDate,
             ["discovery.validation-start"] = window?.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? _settings.ValidationStartDate,
             ["discovery.validation-end"] = window?.End.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? _settings.ValidationEndDate,
+            ["discovery.confirmation-start"] = phase == EvaluationPhase.Confirmation ? _settings.ConfirmationStartDate : string.Empty,
+            ["discovery.confirmation-end"] = phase == EvaluationPhase.Confirmation ? _settings.ConfirmationEndDate : string.Empty,
             ["discovery.validation-window-index"] = window?.Index.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
             ["discovery.validation-window-count"] = _settings.ValidationWindowCount.ToString(CultureInfo.InvariantCulture)
         };
@@ -336,6 +372,32 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         {
             return null;
         }
+    }
+
+    private void CompleteValidation()
+    {
+        if (_selectedValidationRecord is null || _selectedValidationResult is null)
+        {
+            PersistRankings();
+            return;
+        }
+
+        var selected = _selectedValidationRecord;
+        var candidate = new DiscoveryCandidate(
+            _nextCandidateId++,
+            selected.Generation,
+            selected.Population,
+            selected.Genome);
+        var pending = new PendingCandidate(
+            candidate,
+            EvaluationPhase.Confirmation,
+            selected.Population,
+            selected.RobustnessAdjustedFitness,
+            selected.TrainingMetrics,
+            0,
+            _settings.GetConfirmationWindow());
+        _candidates.Add(candidate.Id, pending);
+        PublishOne(candidate, EvaluationPhase.Confirmation, _settings.GetConfirmationWindow());
     }
 
     private static JToken GetToken(JObject source, string name) =>
@@ -425,6 +487,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 .GroupBy(result => result.Population)
                 .ToDictionary(group => group.Key.ToString(), group => group.OrderByDescending(item => item.Fitness).ThenBy(item => item.CandidateId).ToArray()),
             validation,
+            confirmation = _confirmationRecords,
             randomizedBaselineComparison = new
             {
                 baselineValidationCount = randomBaselineScores.Length,
@@ -464,7 +527,8 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
     private enum EvaluationPhase
     {
         Training,
-        Validation
+        Validation,
+        Confirmation
     }
 
     private sealed record PendingCandidate(
@@ -478,6 +542,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
 
     private sealed record ValidationRecord(
         StrategyPopulation Population,
+        int Generation,
         StrategyGenome Genome,
         double TrainingFitness,
         double ValidationFitness,
@@ -485,6 +550,15 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         StrategyBacktestMetrics TrainingMetrics,
         ParameterRobustnessRecord ParameterRobustness,
         IReadOnlyList<ValidationWindowRecord> Windows);
+
+    private sealed record ConfirmationRecord(
+        StrategyGenome Genome,
+        StrategyPopulation Population,
+        double ValidationFitness,
+        double ConfirmationFitness,
+        StrategyBacktestMetrics Metrics,
+        string BacktestId,
+        bool Passed);
 
     private sealed record ParameterRobustnessRecord(
         int RequestedProbeCount,
@@ -509,6 +583,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
 
     private sealed class ValidationGroup(
         StrategyPopulation population,
+        int generation,
         StrategyGenome genome,
         double trainingFitness,
         StrategyBacktestMetrics trainingMetrics,
@@ -516,6 +591,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         int expectedWindowCount)
     {
         public StrategyPopulation Population { get; } = population;
+        public int Generation { get; } = generation;
         public StrategyGenome Genome { get; } = genome;
         public double TrainingFitness { get; } = trainingFitness;
         public StrategyBacktestMetrics TrainingMetrics { get; } = trainingMetrics;
