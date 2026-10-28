@@ -160,8 +160,8 @@ public sealed class GeneticSearchEngine
             slow,
             entry,
             _random.Next(1, entry),
-            _random.Next(StrategyGenome.MinMaxPositions, StrategyGenome.MaxMaxPositions + 1),
-            _random.Next(StrategyGenome.MinExposurePct, StrategyGenome.MaxExposurePct + 1));
+            _random.Next(StrategyGenome.MinMaxPositions, _options.MaximumPositions + 1),
+            _random.Next(StrategyGenome.MinExposurePct, _options.MaximumExposurePercent + 1));
     }
 
     private StrategyGenome Crossover(StrategyGenome first, StrategyGenome second)
@@ -185,8 +185,8 @@ public sealed class GeneticSearchEngine
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { SlowPeriod = _random.Next(StrategyGenome.MinSlowPeriod, StrategyGenome.MaxSlowPeriod + 1) };
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { EntryThresholdTenths = _random.Next(StrategyGenome.MinEntryThresholdTenths, StrategyGenome.MaxEntryThresholdTenths + 1) };
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { ExitThresholdTenths = _random.Next(1, StrategyGenome.MaxEntryThresholdTenths) };
-        if (_random.NextDouble() < _options.MutationRate) genome = genome with { MaxPositions = _random.Next(StrategyGenome.MinMaxPositions, StrategyGenome.MaxMaxPositions + 1) };
-        if (_random.NextDouble() < _options.MutationRate) genome = genome with { MaxExposurePercent = _random.Next(StrategyGenome.MinExposurePct, StrategyGenome.MaxExposurePct + 1) };
+        if (_random.NextDouble() < _options.MutationRate) genome = genome with { MaxPositions = _random.Next(StrategyGenome.MinMaxPositions, _options.MaximumPositions + 1) };
+        if (_random.NextDouble() < _options.MutationRate) genome = genome with { MaxExposurePercent = _random.Next(StrategyGenome.MinExposurePct, _options.MaximumExposurePercent + 1) };
         return genome.Normalize(_options.AllowedTimeframes);
     }
 

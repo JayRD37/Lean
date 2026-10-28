@@ -40,6 +40,16 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void CandidateGenerationRespectsConfiguredPaperPositionAndExposureCaps()
+    {
+        var options = CreateOptions() with { MaximumPositions = 3, MaximumExposurePercent = 30 };
+        var candidates = new GeneticSearchEngine(options).Start();
+
+        Assert.That(candidates.All(candidate => candidate.Genome.MaxPositions <= 3), Is.True);
+        Assert.That(candidates.All(candidate => candidate.Genome.MaxExposurePercent <= 30), Is.True);
+    }
+
+    [Test]
     public void SearchWaitsForEveryParallelEvaluationBeforeBreedingNextGeneration()
     {
         var engine = new GeneticSearchEngine(CreateOptions());

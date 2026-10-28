@@ -118,6 +118,8 @@ public sealed record StrategyDiscoveryOptions
     public int TournamentSize { get; init; } = 3;
     public double MutationRate { get; init; } = 0.15;
     public int Seed { get; init; } = 1729;
+    public int MaximumPositions { get; init; } = StrategyGenome.MaxMaxPositions;
+    public int MaximumExposurePercent { get; init; } = StrategyGenome.MaxExposurePct;
     public int MinimumTrades { get; init; } = 5;
     public double MaximumDrawdown { get; init; } = 0.20;
     public IReadOnlyList<StrategyTimeframe> AllowedTimeframes { get; init; } = [StrategyTimeframe.Daily, StrategyTimeframe.Hour];
@@ -131,6 +133,10 @@ public sealed record StrategyDiscoveryOptions
         if (MutationRate is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(MutationRate), "MutationRate must be between zero and one.");
         if (RandomBaselineSize < 0) throw new ArgumentOutOfRangeException(nameof(RandomBaselineSize), "RandomBaselineSize cannot be negative.");
         if (MinimumTrades < 0) throw new ArgumentOutOfRangeException(nameof(MinimumTrades), "MinimumTrades cannot be negative.");
+        if (MaximumPositions is < StrategyGenome.MinMaxPositions or > StrategyGenome.MaxMaxPositions)
+            throw new ArgumentOutOfRangeException(nameof(MaximumPositions), "MaximumPositions must be between one and five.");
+        if (MaximumExposurePercent is < StrategyGenome.MinExposurePct or > StrategyGenome.MaxExposurePct)
+            throw new ArgumentOutOfRangeException(nameof(MaximumExposurePercent), "MaximumExposurePercent must be between twenty and eighty.");
         if (!double.IsFinite(MaximumDrawdown) || MaximumDrawdown <= 0 || MaximumDrawdown >= 1)
         {
             throw new ArgumentOutOfRangeException(nameof(MaximumDrawdown), "MaximumDrawdown must be between zero and one.");

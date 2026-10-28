@@ -35,9 +35,18 @@ On 2026-10-28, the local `ConsoleLeanOptimizer` completed ten real LEAN backtest
 
 ## Alpaca paper execution
 
-`examples/genetic-discovery/paper-config.overlay.json` documents the LEAN paper brokerage block and parameter names. Merge those values into a private local `config.json`; inject Alpaca paper credentials from a secret manager or environment-specific configuration. Never put credentials in the repository. The base LEAN configuration already sets `alpaca-paper-trading` to `true`, but live execution also requires the algorithm parameter `discovery.allow-paper-trading=true` and an explicit live config selection. These guards prevent accidental live deployment; they are not a substitute for account/broker controls.
+`StrategyDiscovery.Supervisor` runs the optimizer on a schedule, requires a fresh ranking file, approves only evolved candidates that pass per-window trade/drawdown gates and probe checks, and starts LEAN using the promoted genome. The supervisor keeps the current paper process running during optimization. For promotion or shutdown it creates the algorithm's emergency-stop file, waits for managed positions to close and LEAN to exit, then starts the replacement. Optimizer failures leave a running paper process untouched. Unexpected paper-process exits use exponential backoff and stop after the configured consecutive-failure limit. Its JSONL audit and child process logs go under the configured output directory.
 
-Paper trading has not been demonstrated in this workspace: no Alpaca paper credentials were supplied. The example is configuration only, not evidence of a completed unattended paper session.
+The supervisor is Alpaca-paper-only. It refuses to start without both the `--enable-paper` command-line switch and `ALGORY_ALPACA_API_KEY` / `ALGORY_ALPACA_API_SECRET` environment variables. It merges `examples/genetic-discovery/paper-config.overlay.json` over LEAN's base config, forces `environment=live-alpaca`, `alpaca-paper-trading=true`, and the algorithm paper gate, and rejects optimizer/paper mismatches in symbols or risk caps. The generated config with credentials is ephemeral under the current user's temporary directory and is deleted after the LEAN child exits normally; a supervisor crash can leave it behind for manual cleanup. The supervisor has no real-money mode.
+
+To build and run the unattended paper supervisor after setting Alpaca **paper** credentials through a secret manager:
+
+```powershell
+dotnet build QuantConnect.Lean.sln
+dotnet StrategyDiscovery.Supervisor/bin/Debug/QuantConnect.Genetic.Supervisor.dll --config examples/genetic-discovery/supervisor.json --enable-paper
+```
+
+`Ctrl+C` requests shutdown through the emergency-stop file. A manually present emergency-stop file is honored and prevents a restart. Running this workflow has not been demonstrated because this environment has no Alpaca paper credentials. Real-money live trading remains disabled by default and is not supported by this supervisor.
 
 ## Algory comparison
 
@@ -46,7 +55,7 @@ Paper trading has not been demonstrated in this workspace: no Alpaca paper crede
 | Candidate generation and genetic evolution | Implemented independently: seeded random candidates, tournament selection, elitism, uniform crossover and mutation | Exact Algory genome/operator details remain opaque in its protected runtime |
 | Growth and Consistency populations | Separate configurable fitness functions and evolutionary populations | Names and high-level behavior observed/documented; internal scoring is not known |
 | Multiple assets and timeframes | US equity symbols and minute/hour/daily bar resolution | Publicly described behavior; detailed processing is unverified |
-| Held-out validation | Disjoint date window, finalist and randomized baseline backtests | Validation details beyond observed/documented claims are unverified |
+| Held-out validation | Configurable contiguous walk-forward windows, finalist and randomized baseline backtests | Validation details beyond observed/documented claims are unverified |
 | Backtest engine and brokerage/risk models | LEAN backtester, optimizer, Alpaca brokerage model, risk framework | Independently implemented on LEAN |
 | Portfolio-level correlation/exposure limits | Correlation is limited among selected symbols; account position/exposure capacity subtracts existing outside-universe holdings | Same-ticker holdings cannot be attributed to another algorithm, and concurrent algorithms can race; use a dedicated paper account |
 | Chronological walk-forward validation | Configurable contiguous windows; all windows must complete and pass constraints; finalist ranked by the lower median window fitness | Windows are calendar-date partitions, not purged or embargoed; deployment still requires a separately approved process |
@@ -54,7 +63,7 @@ Paper trading has not been demonstrated in this workspace: no Alpaca paper crede
 | Randomized significance analysis | Not implemented yet | Documented or commonly expected research functions; runtime details unverified |
 | Monte Carlo analysis | Seeded IID bootstrap of observed closed-trade returns with loss probability, terminal-return quantiles, and drawdown quantile | Independent diagnostic; it assumes trade outcomes can be resampled independently and is not a predictive distribution |
 | Persistent rankings | Local JSONL history and JSON ranking output | Algory persistence backend is service-dependent and not established |
-| Scheduled health reviews and strategy retirement | Implemented in the example with monthly review decisions, drawdown retirement, and retirement after repeated negative periods | Review requests are logged; no external reoptimization/deployment supervisor exists yet |
+| Scheduled reevaluation and strategy decay/retirement | Example algorithm reviews health monthly and retires at drawdown or repeated negative reviews; supervisor reoptimizes every configured interval and after process exit | Supervisor orchestration is implemented but unattended brokerage behavior has not been observed |
 | Live monitoring and broker execution | LEAN supports broker integrations, but this branch has no unattended verified deployment | Algory cloud/local/subscription split is only partially understood |
 
 The prior investigation found a protected PyInstaller/PyArmor runtime that attempted MetaTrader 5 access and downloaded historical data from Algory's service. UI, external service, entitlement boundaries, and exact engine logic cannot be reliably inferred from the shipped protected binary. This implementation does not evade those protections.
@@ -63,14 +72,14 @@ The observed application boundary is partial: the desktop UI/HUD and protected e
 
 ## Limitations and remaining work
 
-- Backtest/optimizer evaluation and a manually configured LEAN paper algorithm are separate processes today. There is no supervisor that promotes an OOS-approved genome, launches scheduled reoptimization, and restarts LEAN with the approved parameters.
+- Optimizer and LEAN paper processes are coordinated by the supervisor, but supervisor crash recovery and broker-level session recovery have not been integration-tested.
 - Walk-forward validation partitions the holdout into contiguous calendar windows and scores the lower median fitness. It does not add purging/embargo gaps or carry open positions between independent LEAN backtests. Parameter probes alter one genome value at a time by fixed increments; this local sensitivity check does not establish broad parameter stability. Monte Carlo diagnostics use closed-trade P&L divided by entry notional and IID bootstrap resampling; randomized significance tests are not implemented.
 - Multi-timeframe genes select one resolution per candidate; they do not fuse signals across resolutions.
 - Survivorship-bias protection depends on LEAN's installed point-in-time US equity data and corporate-action-aware subscriptions. The available SPY daily archive ends on 2021-03-31, so this smoke run cannot test current market regimes or long-span corporate-action behavior.
 - Account slot/exposure calculations include outside-universe brokerage holdings, but cannot attribute positions in the configured symbols to other algorithms or manual orders. Concurrent algorithms can race these checks, so use a dedicated paper account until broker-level coordination is implemented and tested.
-- A supervisor to act on reoptimization requests and roll approved genomes into a restarted LEAN instance is not implemented. Broker disconnection/rejected-order recovery, process restart/recovery, emergency-stop behavior, and account-wide live risk enforcement need dedicated integration tests before deployment.
+- Broker disconnection/rejected-order recovery, supervisor restart recovery, paper-session order outcomes, and concurrent broker-level risk coordination need integration tests before unattended paper deployment.
 - Full unattended paper trading requires local market data, a functioning LEAN runtime, Alpaca paper credentials, network access, and an observed session. No profitable performance claim is made.
 
 ## Test coverage
 
-The added tests cover deterministic genetic progression, batch completion, scoring differences, genome bounds, deterministic parameter neighborhoods, duplicate completion rejection, Monte Carlo repeatability and input validation, lifecycle scheduling/retirement, chronological walk-forward window partitioning/completion, parameter-probe backtest scheduling, existing-position exposure/slot budgets, malformed backtest results, and the LEAN optimizer train/validation contract. The focused `StrategyDiscovery.Tests` suite passes 18/18. Running the full LEAN `Tests` assembly was attempted, but its host aborted during shutdown in the repository Python runtime (`Python.Runtime.Py.GILState.Finalize`: GIL released from a different thread); the focused project avoids loading that unrelated runtime. These tests do not constitute integration coverage for broker execution, market data bias/corporate actions, slippage calibration, process recovery, or live operations.
+The added tests cover deterministic genetic progression, batch completion, scoring differences, genome bounds and configured caps, deterministic parameter neighborhoods, duplicate completion rejection, Monte Carlo repeatability and input validation, lifecycle scheduling/retirement, chronological walk-forward window partitioning/completion, parameter-probe backtest scheduling, existing-position exposure/slot budgets, promotion gates, paper-config guards, bounded paper-process restart backoff, and the LEAN optimizer train/validation contract. The focused `StrategyDiscovery.Tests` suite passes 25/25. Running the full LEAN `Tests` assembly was attempted, but its host aborted during shutdown in the repository Python runtime (`Python.Runtime.Py.GILState.Finalize`: GIL released from a different thread); the focused project avoids loading that unrelated runtime. These tests do not constitute integration coverage for broker execution, market data bias/corporate actions, slippage calibration, process recovery, or live operations.
