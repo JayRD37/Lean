@@ -125,6 +125,33 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void TradeOrderShufflePermutesObservedTradesWithoutReplacementAndIsRepeatable()
+    {
+        var returns = new[] { 0.10, -0.50, 0.10, -0.50, 0.20 };
+
+        var first = TradeOrderShuffleAnalyzer.Analyze(returns, 1000, 4321);
+        var second = TradeOrderShuffleAnalyzer.Analyze(returns, 1000, 4321);
+
+        Assert.That(first, Is.EqualTo(second));
+        Assert.That(first.TradeCount, Is.EqualTo(returns.Length));
+        Assert.That(first.SimulationCount, Is.EqualTo(1000));
+        Assert.That(first.DrawdownThreshold, Is.EqualTo(0.40));
+        Assert.That(first.ProbabilityOfExceedingDrawdownThreshold, Is.InRange(0d, 1d).And.GreaterThan(0d));
+        Assert.That(first.NinetyFifthPercentileDrawdown, Is.InRange(0d, 1d));
+        Assert.That(first.WorstObservedDrawdown, Is.GreaterThanOrEqualTo(first.NinetyFifthPercentileDrawdown));
+    }
+
+    [Test]
+    public void TradeOrderShuffleRejectsInvalidInputs()
+    {
+        Assert.Throws<ArgumentException>(() => TradeOrderShuffleAnalyzer.Analyze([], 100, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TradeOrderShuffleAnalyzer.Analyze([0.01], 0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TradeOrderShuffleAnalyzer.Analyze([0.01], 100, 1, 1));
+        Assert.Throws<ArgumentException>(() => TradeOrderShuffleAnalyzer.Analyze([double.NaN], 100, 1));
+        Assert.Throws<ArgumentException>(() => TradeOrderShuffleAnalyzer.Analyze([-1d], 100, 1));
+    }
+
+    [Test]
     public void RandomizedBaselineComparisonReportsEmpiricalTailProbabilityAndResolution()
     {
         var baseline = Enumerable.Range(1, 19).Select(index => index / 20d).ToArray();

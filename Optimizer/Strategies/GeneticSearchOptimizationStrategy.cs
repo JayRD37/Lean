@@ -367,6 +367,12 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             MonteCarlo = metrics?.TradeReturns is { Count: > 0 }
                 ? MonteCarloAnalyzer.Analyze(metrics.TradeReturns, _settings.MonteCarloSimulationCount, _settings.Seed ^ candidate.Id)
                 : null,
+            TradeOrderShuffle = metrics?.TradeReturns is { Count: > 0 }
+                ? TradeOrderShuffleAnalyzer.Analyze(
+                    metrics.TradeReturns,
+                    _settings.MonteCarloSimulationCount,
+                    _settings.Seed ^ candidate.Id ^ 0x5F356495)
+                : null,
             Fitness = metrics is null ? GeneticSearchEngine.InvalidFitness : GeneticSearchEngine.Score(metrics, candidate.Population, _settings.MinimumTrades, _settings.MaximumDrawdown)
         };
         try
