@@ -24,14 +24,14 @@ if ($LASTEXITCODE -ne 0 -or -not ($sdks | Where-Object { $_ -match '^10\.' })) {
 
 if (-not (Test-Path $sourceDirectory)) {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    & git clone --no-checkout $pluginRepository $sourceDirectory
+    & git clone $pluginRepository $sourceDirectory
     if ($LASTEXITCODE -ne 0) { throw "Unable to clone the official LEAN Alpaca brokerage plugin." }
     & git -C $sourceDirectory fetch --depth 1 origin $pluginCommit
     if ($LASTEXITCODE -ne 0) { throw "Unable to fetch pinned Alpaca plugin commit $pluginCommit." }
 }
 
 $checkedOutCommit = (& git -C $sourceDirectory rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $checkedOutCommit -ne $pluginCommit) {
+if ($LASTEXITCODE -ne 0 -or $checkedOutCommit -ne $pluginCommit -or -not (Test-Path $projectPath)) {
     & git -C $sourceDirectory fetch --depth 1 origin $pluginCommit
     if ($LASTEXITCODE -ne 0) { throw "Unable to fetch pinned Alpaca plugin commit $pluginCommit." }
     & git -C $sourceDirectory checkout --detach $pluginCommit
