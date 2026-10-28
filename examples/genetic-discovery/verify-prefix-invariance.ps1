@@ -162,6 +162,7 @@ function Get-NormalizedOrders($Result, [datetime] $Through) {
 
 $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
+$repeatability = Run-Backtest 'repeatability' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $costStress = Run-Backtest 'cost-stress' '2019-01-01' '2021-02-15' 'SPY' 'Daily' 'None' 1 50 0.85 $false 200
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
@@ -174,6 +175,7 @@ $multiLong = Run-Backtest 'multi-full-history' '2020-01-02' '2021-03-31' 'SPY' '
 $drawdownRun = Run-Backtest -Name 'drawdown-shutdown' -StartDate '2019-01-01' -EndDate '2020-05-01' -Symbol 'SPY' -MaximumDrawdown 0.05
 Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
+$repeatabilityOrders = @(Get-NormalizedOrders $repeatability.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
 $multiShortOrders = @(Get-NormalizedOrders $multiShort.Result $through)
 $multiLongOrders = @(Get-NormalizedOrders $multiLong.Result $through)
@@ -197,7 +199,12 @@ $firstDrawdownExit = ($drawdownExits | ForEach-Object { [datetime]::Parse($_.las
 if (@($drawdownOrders | Where-Object { [datetime]::Parse($_.lastFillTime) -gt $firstDrawdownExit -and $_.tag -notmatch 'drawdown or kill switch' }).Count -gt 0) { throw "Strategy submitted non-liquidation orders after its drawdown trip; inspect $($drawdownRun.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN drawdown guard latched, liquidated the SPY holding, persisted the trip, and prevented later strategy orders."
 $shortJson = ConvertTo-Json -InputObject $shortOrders -Depth 5 -Compress
+$repeatabilityJson = ConvertTo-Json -InputObject $repeatabilityOrders -Depth 5 -Compress
 $longJson = ConvertTo-Json -InputObject $longOrders -Depth 5 -Compress
+if ($repeatabilityOrders.Count -eq 0 -or $shortJson -cne $repeatabilityJson) {
+    throw "Identical fixed-genome LEAN runs produced different fills through $($through.ToString('yyyy-MM-dd')); inspect $($short.LogPath) and $($repeatability.LogPath)"
+}
+Write-Output "PASS: repeated fixed-genome LEAN runs produced identical fills through $($through.ToString('yyyy-MM-dd'))."
 if ($shortJson -cne $longJson) {
     $shortOrders | Export-Csv (Join-Path $OutputRoot 'prefix-orders.csv') -NoTypeInformation
     $longOrders | Export-Csv (Join-Path $OutputRoot 'full-history-orders.csv') -NoTypeInformation
