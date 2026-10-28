@@ -40,6 +40,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private double _exitThreshold;
     private string _killSwitchFile;
     private bool _shutdownRequested;
+    private bool _auditPortfolioSelection;
     private PortfolioDrawdownGuard _drawdownGuard = null!;
     private StrategyLifecycleMonitor _lifecycleMonitor;
     private StrategyLifecycleOptions _lifecycleOptions;
@@ -60,6 +61,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _minimumSpreadBasisPoints = (decimal)GetParameter("discovery.minimum-spread-bps", 5d);
         _maximumCorrelation = GetParameter("discovery.max-correlation", 0.85d);
         _maximumPortfolioDrawdown = GetParameter("discovery.max-drawdown", 0.10d);
+        _auditPortfolioSelection = string.Equals(GetParameter("discovery.audit-portfolio-selection", "false"), "true", StringComparison.OrdinalIgnoreCase);
         _killSwitchFile = GetParameter("discovery.kill-switch-file", "emergency-stop");
 
         ValidateGenome();
@@ -226,6 +228,11 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
 
         var confirmationTag = _confirmationTimeframe is { } confirm ? $"+{confirm}" : string.Empty;
+        if (_auditPortfolioSelection)
+        {
+            var selectedTickers = string.Join(',', selected.Select(signal => signal.State.Symbol.Value).Order(StringComparer.Ordinal));
+            Debug($"Portfolio selection audit: symbols={selectedTickers} positionCount={selected.Count} availablePositions={riskBudget.AvailablePositions} targetWeight={targetWeight.ToString("P2", CultureInfo.InvariantCulture)} grossTarget={(targetWeight * selected.Count).ToString("P2", CultureInfo.InvariantCulture)} maxGross={_maxExposurePercent}%");
+        }
         SetHoldings(targets, liquidateExistingHoldings: false, tag: $"{_family} {_resolution}{confirmationTag}");
     }
 
