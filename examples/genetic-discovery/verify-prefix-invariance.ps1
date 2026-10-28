@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5, [string] $UniverseMode = 'Configured', [int] $UniverseSize = 20) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None', [int] $MaxPositions = 1, [int] $MaxExposurePercent = 50, [double] $MaximumCorrelation = 0.85, [bool] $AuditPortfolioSelection = $false, [decimal] $MinimumSpreadBps = 5, [string] $UniverseMode = 'Configured', [int] $UniverseSize = 20, [decimal] $MaximumDrawdown = 0.50) {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -59,7 +59,7 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
         'discovery.max-exposure-percent' = [string]$MaxExposurePercent
         'discovery.minimum-spread-bps' = $MinimumSpreadBps.ToString([Globalization.CultureInfo]::InvariantCulture)
         'discovery.max-correlation' = $MaximumCorrelation.ToString([Globalization.CultureInfo]::InvariantCulture)
-        'discovery.max-drawdown' = '0.50'
+        'discovery.max-drawdown' = $MaximumDrawdown.ToString([Globalization.CultureInfo]::InvariantCulture)
         'discovery.max-negative-review-periods' = '100'
         'discovery.retirement-drawdown' = '0.99'
         'discovery.audit-portfolio-selection' = $AuditPortfolioSelection.ToString().ToLowerInvariant()
@@ -171,6 +171,7 @@ $multiAssetShort = Run-Backtest 'multi-asset-prefix' '2019-01-01' '2021-02-15' '
 $multiAsset = Run-Backtest 'multi-asset' '2019-01-01' '2021-03-31' 'SPY|QQQ|IWM' 'Daily' 'None' 3 60 0.99 $true
 $multiShort = Run-Backtest 'multi-prefix' '2020-01-02' '2021-02-15' 'SPY' 'Hour' 'Daily'
 $multiLong = Run-Backtest 'multi-full-history' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
+$drawdownRun = Run-Backtest -Name 'drawdown-shutdown' -StartDate '2019-01-01' -EndDate '2020-05-01' -Symbol 'SPY' -MaximumDrawdown 0.05
 Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
@@ -184,6 +185,17 @@ $pointInTimeUniverseLongOrders = @(Get-NormalizedOrders $pointInTimeUniverse.Res
 $multiAssetSymbols = @((Get-NormalizedOrders $multiAsset.Result ([datetime]'2021-03-31')) | Select-Object -ExpandProperty Symbol -Unique)
 
 if ($shortOrders.Count -eq 0) { throw "Prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($short.LogPath)" }
+$drawdownState = Get-Content -LiteralPath $drawdownRun.DrawdownPath -Raw | ConvertFrom-Json
+if (-not $drawdownState.Tripped) { throw "Historical SPY drawdown did not trip the persistent account guard; inspect $($drawdownRun.AlgorithmLogPath)" }
+$drawdownOrders = @($drawdownRun.Result.Orders.PSObject.Properties | ForEach-Object { $_.Value } | Where-Object { $_.status -eq 3 })
+$drawdownEntries = @($drawdownOrders | Where-Object { $_.tag -notmatch 'drawdown or kill switch' -and [decimal]$_.quantity -gt 0 })
+$drawdownExits = @($drawdownOrders | Where-Object { $_.tag -match 'drawdown or kill switch' })
+if ($drawdownEntries.Count -eq 0 -or $drawdownExits.Count -eq 0) { throw "Drawdown guard did not demonstrate entry followed by risk liquidation; inspect $($drawdownRun.AlgorithmLogPath)" }
+$drawdownNetQuantity = ($drawdownOrders | Measure-Object -Property quantity -Sum).Sum
+if ([math]::Abs([decimal]$drawdownNetQuantity) -gt [decimal]0.000001) { throw "Drawdown shutdown ended with a non-flat managed position ($drawdownNetQuantity shares); inspect $($drawdownRun.AlgorithmLogPath)" }
+$firstDrawdownExit = ($drawdownExits | ForEach-Object { [datetime]::Parse($_.lastFillTime) } | Measure-Object -Minimum).Minimum
+if (@($drawdownOrders | Where-Object { [datetime]::Parse($_.lastFillTime) -gt $firstDrawdownExit -and $_.tag -notmatch 'drawdown or kill switch' }).Count -gt 0) { throw "Strategy submitted non-liquidation orders after its drawdown trip; inspect $($drawdownRun.AlgorithmLogPath)" }
+Write-Output "PASS: LEAN drawdown guard latched, liquidated the SPY holding, persisted the trip, and prevented later strategy orders."
 $shortJson = ConvertTo-Json -InputObject $shortOrders -Depth 5 -Compress
 $longJson = ConvertTo-Json -InputObject $longOrders -Depth 5 -Compress
 if ($shortJson -cne $longJson) {
