@@ -11,6 +11,8 @@ public sealed class BrokerageSafetyGate
 
     public bool CanSubmitOrders => IsConnected && !IsTripped;
 
+    public bool CanLiquidate => IsConnected;
+
     public bool MustLiquidate => IsTripped;
 
     public void Disconnect() => IsConnected = false;

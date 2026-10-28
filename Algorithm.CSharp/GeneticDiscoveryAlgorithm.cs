@@ -114,6 +114,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (_shutdownRequested || _brokerageSafety.MustLiquidate)
         {
             _shutdownRequested = true;
+            if (!_brokerageSafety.CanLiquidate) return;
             LiquidateManagedPositions("emergency shutdown");
             if (_symbols.Keys.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
             return;
@@ -122,7 +123,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (ShouldShutdown())
         {
             _shutdownRequested = true;
-            LiquidateManagedPositions("drawdown or kill switch");
+            if (_brokerageSafety.CanLiquidate) LiquidateManagedPositions("drawdown or kill switch");
             return;
         }
 
@@ -216,7 +217,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _brokerageSafety.Trip(reason);
         _shutdownRequested = true;
         Debug($"Execution safety gate tripped. {reason}");
-        LiquidateManagedPositions("invalid order safety shutdown");
+        if (_brokerageSafety.CanLiquidate) LiquidateManagedPositions("invalid order safety shutdown");
     }
 
     /// <summary>Provides an in-process kill switch and can also be called by an algorithm host.</summary>
@@ -224,7 +225,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     {
         _shutdownRequested = true;
         Debug($"Emergency shutdown requested: {reason}");
-        LiquidateManagedPositions($"emergency shutdown: {reason}");
+        if (_brokerageSafety.CanLiquidate) LiquidateManagedPositions($"emergency shutdown: {reason}");
     }
 
     private List<TradeSignal> SelectDiversified(IReadOnlyList<TradeSignal> candidates, int availablePositions)

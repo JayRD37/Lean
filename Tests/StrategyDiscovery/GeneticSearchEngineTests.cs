@@ -170,10 +170,12 @@ public class GeneticSearchEngineTests
 
         gate.Disconnect();
         Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.CanLiquidate, Is.False);
         Assert.That(gate.MustLiquidate, Is.False);
 
         gate.Reconnect();
         Assert.That(gate.CanSubmitOrders, Is.True);
+        Assert.That(gate.CanLiquidate, Is.True);
     }
 
     [Test]
@@ -189,6 +191,7 @@ public class GeneticSearchEngineTests
 
         gate.Reconnect();
         Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.CanLiquidate, Is.True);
         Assert.That(gate.MustLiquidate, Is.True);
         Assert.Throws<ArgumentException>(() => gate.Trip(" "));
     }
