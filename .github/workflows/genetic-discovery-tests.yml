@@ -11,6 +11,8 @@ on:
       - 'StrategyDiscovery/**'
       - 'StrategyDiscovery.Supervisor/**'
       - 'StrategyDiscovery.Tests/**'
+      - 'scripts/setup-alpaca-plugin.ps1'
+      - 'examples/genetic-discovery/**'
       - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
       - 'Tests/StrategyDiscovery/**'
       - 'global.json'
@@ -25,6 +27,8 @@ on:
       - 'StrategyDiscovery/**'
       - 'StrategyDiscovery.Supervisor/**'
       - 'StrategyDiscovery.Tests/**'
+      - 'scripts/setup-alpaca-plugin.ps1'
+      - 'examples/genetic-discovery/**'
       - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
       - 'Tests/StrategyDiscovery/**'
       - 'global.json'
@@ -49,6 +53,10 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.403
+
+      - name: Build and stage the pinned LEAN Alpaca plugin
+        shell: pwsh
+        run: ./scripts/setup-alpaca-plugin.ps1 -DestinationDirectory "$PWD/.artifacts/alpaca-plugin"
 
       - name: Build the full LEAN solution
         run: dotnet build QuantConnect.Lean.sln --configuration Release --verbosity quiet /p:WarningLevel=1

@@ -13,6 +13,7 @@ public sealed class SupervisorSettings
     [JsonProperty("lean-working-directory")] public string LeanWorkingDirectory { get; set; } = string.Empty;
     [JsonProperty("lean-base-config")] public string LeanBaseConfig { get; set; } = string.Empty;
     [JsonProperty("paper-config-overlay")] public string PaperConfigOverlay { get; set; } = string.Empty;
+    [JsonProperty("alpaca-plugin-directory")] public string AlpacaPluginDirectory { get; set; } = string.Empty;
     [JsonProperty("output-directory")] public string OutputDirectory { get; set; } = string.Empty;
     [JsonProperty("kill-switch-file")] public string KillSwitchFile { get; set; } = string.Empty;
     [JsonProperty("reoptimization-interval-hours")] public int ReoptimizationIntervalHours { get; set; } = 168;
@@ -41,6 +42,7 @@ public sealed class SupervisorSettings
         settings.LeanWorkingDirectory = Resolve(root, settings.LeanWorkingDirectory);
         settings.LeanBaseConfig = Resolve(root, settings.LeanBaseConfig);
         settings.PaperConfigOverlay = Resolve(root, settings.PaperConfigOverlay);
+        settings.AlpacaPluginDirectory = Resolve(root, settings.AlpacaPluginDirectory);
         settings.OutputDirectory = Resolve(root, settings.OutputDirectory);
         settings.KillSwitchFile = Resolve(root, settings.KillSwitchFile);
         settings.Validate();
@@ -60,7 +62,7 @@ public sealed class SupervisorSettings
 
     public void Validate()
     {
-        foreach (var path in new[] { OptimizerLauncherDll, OptimizerWorkingDirectory, OptimizerConfig, LeanLauncherDll, LeanWorkingDirectory, LeanBaseConfig, PaperConfigOverlay })
+        foreach (var path in new[] { OptimizerLauncherDll, OptimizerWorkingDirectory, OptimizerConfig, LeanLauncherDll, LeanWorkingDirectory, LeanBaseConfig, PaperConfigOverlay, AlpacaPluginDirectory })
         {
             if (string.IsNullOrWhiteSpace(path)) throw new InvalidDataException("All optimizer and LEAN paths must be set.");
         }
@@ -71,10 +73,14 @@ public sealed class SupervisorSettings
         if (!double.IsFinite(MaximumValidationDrawdown) || MaximumValidationDrawdown is <= 0 or >= 1)
             throw new InvalidDataException("maximum-validation-drawdown must be between zero and one.");
         if (!double.IsFinite(MinimumRobustnessAdjustedFitness)) throw new InvalidDataException("minimum-robustness-adjusted-fitness must be finite.");
-        foreach (var path in new[] { OptimizerLauncherDll, OptimizerWorkingDirectory, OptimizerConfig, LeanLauncherDll, LeanWorkingDirectory, LeanBaseConfig, PaperConfigOverlay })
+        foreach (var path in new[] { OptimizerLauncherDll, OptimizerWorkingDirectory, OptimizerConfig, LeanLauncherDll, LeanWorkingDirectory, LeanBaseConfig, PaperConfigOverlay, AlpacaPluginDirectory })
         {
             if (!File.Exists(path) && !Directory.Exists(path)) throw new FileNotFoundException("Configured supervisor path does not exist.", path);
         }
+        if (!Directory.Exists(AlpacaPluginDirectory) ||
+            !File.Exists(Path.Combine(AlpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll")) ||
+            !File.Exists(Path.Combine(AlpacaPluginDirectory, "Alpaca.Markets.dll")))
+            throw new InvalidDataException("alpaca-plugin-directory must contain the LEAN Alpaca brokerage assembly and Alpaca.Markets dependency. Run scripts/setup-alpaca-plugin.ps1 first.");
 
         var optimizer = JObjectConfig.Read(OptimizerConfig);
         var optimizerSettings = optimizer["optimization-strategy-settings"] as JObject

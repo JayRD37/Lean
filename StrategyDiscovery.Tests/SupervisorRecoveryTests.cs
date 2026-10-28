@@ -223,10 +223,15 @@ public class SupervisorRecoveryTests
 
             var paperResultsDirectory = Path.Combine(folder, "paper-results-fixture");
             Directory.CreateDirectory(paperResultsDirectory);
+            var alpacaPluginDirectory = Path.Combine(folder, "alpaca-plugin-fixture");
+            Directory.CreateDirectory(alpacaPluginDirectory);
+            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             configPath = PaperConfigFactory.WriteEphemeralConfig(new JObject
             {
                 ["alpaca-paper-trading"] = true,
                 ["log-handler"] = "QuantConnect.Logging.FileLogHandler",
+                ["plugin-directory"] = alpacaPluginDirectory,
                 ["results-destination-folder"] = paperResultsDirectory,
                 ["environments"] = new JObject
                 {
@@ -243,6 +248,9 @@ public class SupervisorRecoveryTests
                 }
             });
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, folder), Is.True);
+            File.Delete(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"));
+            Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, folder), Is.False);
+            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, Path.Combine(folder, "different-stop"), folder), Is.False);
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, Path.Combine(folder, "different-output")), Is.False);
             var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 10, 40, 12, 4, 3, 30);

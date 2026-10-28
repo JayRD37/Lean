@@ -12,6 +12,7 @@ public static class PaperConfigFactory
         string algorithmTypeName,
         PromotedStrategy strategy,
         string resultsDestinationFolder,
+        string alpacaPluginDirectory,
         string killSwitchPath,
         string alpacaApiKey,
         string alpacaApiSecret)
@@ -19,6 +20,10 @@ public static class PaperConfigFactory
         if (string.IsNullOrWhiteSpace(alpacaApiKey) || string.IsNullOrWhiteSpace(alpacaApiSecret))
             throw new InvalidOperationException("Alpaca paper API key and secret must be supplied via environment variables.");
         if (string.IsNullOrWhiteSpace(algorithmTypeName)) throw new ArgumentException("An algorithm type name is required.", nameof(algorithmTypeName));
+        if (!Directory.Exists(alpacaPluginDirectory) ||
+            !File.Exists(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll")) ||
+            !File.Exists(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll")))
+            throw new InvalidDataException("The configured Alpaca plugin directory is missing the LEAN brokerage assembly or Alpaca.Markets dependency.");
 
         var config = JObjectConfig.Read(baseConfigPath);
         var overlay = JObjectConfig.Read(overlayPath);
@@ -28,6 +33,7 @@ public static class PaperConfigFactory
         config["algorithm-language"] = "CSharp";
         config["results-destination-folder"] = Path.GetFullPath(resultsDestinationFolder);
         config["log-handler"] = "QuantConnect.Logging.FileLogHandler";
+        config["plugin-directory"] = Path.GetFullPath(alpacaPluginDirectory);
         config["alpaca-api-key"] = alpacaApiKey;
         config["alpaca-api-secret"] = alpacaApiSecret;
         config["alpaca-paper-trading"] = true;
@@ -110,11 +116,15 @@ public static class PaperConfigFactory
             var environment = config["environments"]?["live-alpaca"] as JObject;
             var parameters = config["parameters"] as JObject;
             var resultsDirectory = Path.GetFullPath(config["results-destination-folder"]?.Value<string>() ?? string.Empty);
+            var pluginDirectory = Path.GetFullPath(config["plugin-directory"]?.Value<string>() ?? string.Empty);
             var outputRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory)) + Path.DirectorySeparatorChar;
             return config["alpaca-paper-trading"]?.Value<bool>() == true &&
                 config["log-handler"]?.Value<string>() == "QuantConnect.Logging.FileLogHandler" &&
                 resultsDirectory.StartsWith(outputRoot, StringComparison.OrdinalIgnoreCase) &&
                 Directory.Exists(resultsDirectory) &&
+                Directory.Exists(pluginDirectory) &&
+                File.Exists(Path.Combine(pluginDirectory, "QuantConnect.Brokerages.Alpaca.dll")) &&
+                File.Exists(Path.Combine(pluginDirectory, "Alpaca.Markets.dll")) &&
                 environment?["live-mode"]?.Value<bool>() == true &&
                 environment?["live-mode-brokerage"]?.Value<string>() == "AlpacaBrokerage" &&
                 parameters?["discovery.allow-paper-trading"]?.Value<string>() == "true" &&

@@ -223,6 +223,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             algorithmType,
             strategy,
             resultsDirectory,
+            settings.AlpacaPluginDirectory,
             settings.KillSwitchFile,
             apiKey,
             apiSecret);
