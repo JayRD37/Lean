@@ -110,15 +110,15 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     {
         if (_shutdownRequested)
         {
-            Liquidate(tag: "emergency shutdown");
-            if (!Portfolio.Invested) Quit("Emergency shutdown complete.");
+            LiquidateManagedPositions("emergency shutdown");
+            if (_symbols.Keys.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
             return;
         }
 
         if (ShouldShutdown())
         {
             _shutdownRequested = true;
-            Liquidate(tag: "drawdown or kill switch");
+            LiquidateManagedPositions("drawdown or kill switch");
             return;
         }
 
@@ -138,7 +138,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         {
             _shutdownRequested = true;
             Debug($"Strategy retired after scheduled health review: return={health.PeriodReturn:P2}, drawdown={health.DrawdownFromPeak:P2}, negativeReviews={health.ConsecutiveNegativeReviews}.");
-            Liquidate(tag: "strategy health retirement");
+            LiquidateManagedPositions("strategy health retirement");
             return;
         }
         if (health.Action == StrategyLifecycleAction.Reevaluate)
@@ -173,16 +173,14 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             if (strength > 0) candidates.Add(new TradeSignal(state, strength));
         }
 
-        var selected = SelectDiversified(candidates);
-        if (selected.Count == 0)
-        {
-            Liquidate(tag: "no active signal");
-            return;
-        }
-
-        var targetWeight = (_maxExposurePercent / 100m) / selected.Count;
-        var targets = selected.Select(signal => new PortfolioTarget(signal.State.Symbol, targetWeight)).ToList();
-        SetHoldings(targets, liquidateExistingHoldings: true, tag: $"{_family} {_resolution}");
+        var riskBudget = GetAccountRiskBudget();
+        var selected = SelectDiversified(candidates, riskBudget.AvailablePositions);
+        var targetWeight = selected.Count == 0 ? 0m : riskBudget.AvailableGrossExposureFraction / selected.Count;
+        var selectedSymbols = selected.Select(signal => signal.State.Symbol).ToHashSet();
+        var targets = _symbols.Keys
+            .Select(symbol => new PortfolioTarget(symbol, selectedSymbols.Contains(symbol) ? targetWeight : 0m))
+            .ToList();
+        SetHoldings(targets, liquidateExistingHoldings: false, tag: $"{_family} {_resolution}");
     }
 
     /// <summary>Provides an in-process kill switch and can also be called by an algorithm host.</summary>
@@ -190,20 +188,42 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     {
         _shutdownRequested = true;
         Debug($"Emergency shutdown requested: {reason}");
-        Liquidate(tag: $"emergency shutdown: {reason}");
+        LiquidateManagedPositions($"emergency shutdown: {reason}");
     }
 
-    private List<TradeSignal> SelectDiversified(IReadOnlyList<TradeSignal> candidates)
+    private List<TradeSignal> SelectDiversified(IReadOnlyList<TradeSignal> candidates, int availablePositions)
     {
-        var selected = new List<TradeSignal>(_maxPositions);
+        var selected = new List<TradeSignal>(Math.Min(_maxPositions, availablePositions));
+        if (availablePositions <= 0) return selected;
         foreach (var candidate in candidates.OrderByDescending(item => item.Strength).ThenBy(item => item.State.Symbol.Value, StringComparer.Ordinal))
         {
             if (selected.Any(existing => Math.Abs(Correlation(candidate.State, existing.State)) >= _maximumCorrelation)) continue;
             selected.Add(candidate);
-            if (selected.Count == _maxPositions) break;
+            if (selected.Count == availablePositions) break;
         }
 
         return selected;
+    }
+
+    private PortfolioRiskBudget GetAccountRiskBudget()
+    {
+        var managedSymbols = _symbols.Keys.ToHashSet();
+        var externalHoldings = Portfolio.Values
+            .Where(holding => holding.Invested && !managedSymbols.Contains(holding.Symbol))
+            .Select(holding => holding.AbsoluteHoldingsValue);
+        return PortfolioRiskBudget.Calculate(
+            _maxPositions,
+            _maxExposurePercent / 100m,
+            Portfolio.TotalPortfolioValue,
+            externalHoldings);
+    }
+
+    private void LiquidateManagedPositions(string tag)
+    {
+        foreach (var symbol in _symbols.Keys)
+        {
+            if (Portfolio[symbol].Invested) Liquidate(symbol, tag: tag);
+        }
     }
 
     private bool ShouldShutdown()

@@ -154,6 +154,24 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void PortfolioRiskBudgetSubtractsExistingPositionsAndExposure()
+    {
+        var budget = PortfolioRiskBudget.Calculate(5, 0.80m, 1_000m, [200m, 100m, 0m]);
+
+        Assert.That(budget.AvailablePositions, Is.EqualTo(3));
+        Assert.That(budget.AvailableGrossExposureFraction, Is.EqualTo(0.50m));
+    }
+
+    [Test]
+    public void PortfolioRiskBudgetStopsNewExposureWhenExistingHoldingsExceedLimit()
+    {
+        var budget = PortfolioRiskBudget.Calculate(4, 0.50m, 1_000m, [600m, 100m]);
+
+        Assert.That(budget.AvailablePositions, Is.EqualTo(2));
+        Assert.That(budget.AvailableGrossExposureFraction, Is.Zero);
+    }
+
+    [Test]
     public void WalkForwardWindowsAreChronologicalContiguousAndCoverTheInclusiveRange()
     {
         var start = new DateOnly(2023, 1, 1);
