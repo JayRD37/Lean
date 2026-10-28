@@ -2,7 +2,7 @@
 
 This branch adds an independent, deterministic genetic search module and connects it to LEAN's existing optimizer and backtest runner. The Algory investigation remains behavioral research only; no Algory executable, service, protected code, or license mechanism is used here.
 
-The repository baseline is upstream LEAN commit `22404ea28b8d3f3c9eb74d6ed9f0444426f8e417` (upstream `master` at the fork point, rechecked on 2026-10-27). The exact commit plus the SDK pin makes the build baseline reproducible.
+The repository baseline is upstream LEAN commit `22404ea28b8d3f3c9eb74d6ed9f0444426f8e417`, verified as upstream `master` on 2026-10-28. GitHub's latest non-prerelease tag is `v2.4.0.1` from 2017, so the fork uses the current upstream source head instead of that old release tag. The full source SHA plus the SDK pin makes the build baseline reproducible.
 
 ## Architecture
 
