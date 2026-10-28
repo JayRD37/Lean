@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using QuantConnect.Genetic;
 using QuantConnect.Genetic.Supervisor;
 
 namespace QuantConnect.Tests.StrategyDiscovery;
@@ -16,13 +18,16 @@ public class SupervisorRecoveryTests
         try
         {
             var statePath = Path.Combine(folder, "active-paper-session.json");
-            var identity = new PaperProcessIdentity(1234, DateTimeOffset.Parse("2026-10-28T12:00:00Z"));
+            var configPath = PaperConfigFactory.WriteEphemeralConfig(new JObject());
+            var identity = new PaperProcessIdentity(1234, DateTimeOffset.Parse("2026-10-28T12:00:00Z"), configPath);
             PaperProcessRecoveryGuard.Save(statePath, identity);
             Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => identity.StartedAtUtc), Is.EqualTo(identity));
             Assert.That(File.Exists(statePath), Is.True);
+            Assert.That(File.Exists(configPath), Is.True);
 
             Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => null), Is.Null);
             Assert.That(File.Exists(statePath), Is.False);
+            Assert.That(File.Exists(configPath), Is.False, "A stale marker should remove its orphaned credential config.");
 
             PaperProcessRecoveryGuard.Save(statePath, identity);
             Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => identity.StartedAtUtc.AddSeconds(1)), Is.EqualTo(identity));
@@ -153,6 +158,143 @@ public class SupervisorRecoveryTests
             }
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         }
+    }
+
+    [Test]
+    public async Task RestartedSupervisorAdoptsVerifiedPaperChildAndStopsItOnShutdown()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "lean-paper-adoption-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
+        var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        Process? adoptedChild = null;
+        string? configPath = null;
+        try
+        {
+            var fixtureAssembly = Path.Combine(TestContext.CurrentContext.TestDirectory, "QuantConnect.Genetic.ProcessFixture.dll");
+            Assert.That(File.Exists(fixtureAssembly), Is.True);
+            var statePath = Path.Combine(folder, "active-paper-session.json");
+            var killSwitchPath = Path.Combine(folder, "emergency-stop");
+            var childMetadataPath = Path.Combine(folder, "child-process.txt");
+            var donePath = Path.Combine(folder, "child-stopped.txt");
+            var dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+            var launcher = new ProcessStartInfo(string.IsNullOrWhiteSpace(dotnetHost) ? "dotnet" : dotnetHost)
+            {
+                UseShellExecute = false
+            };
+            launcher.ArgumentList.Add(fixtureAssembly);
+            launcher.ArgumentList.Add("--launch-recoverable-child-and-exit");
+            launcher.ArgumentList.Add(childMetadataPath);
+            launcher.ArgumentList.Add(killSwitchPath);
+            launcher.ArgumentList.Add(donePath);
+            using (var parent = Process.Start(launcher) ?? throw new InvalidOperationException("Unable to start the recoverable-child fixture."))
+            {
+                await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.That(parent.ExitCode, Is.Zero);
+            }
+
+            var fields = File.ReadAllText(childMetadataPath).Trim().Split('|');
+            Assert.That(fields, Has.Length.EqualTo(2));
+            var processId = int.Parse(fields[0], CultureInfo.InvariantCulture);
+            var startedAtUtc = DateTimeOffset.Parse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            adoptedChild = Process.GetProcessById(processId);
+            Assert.That(adoptedChild.HasExited, Is.False);
+
+            var paperResultsDirectory = Path.Combine(folder, "paper-results-fixture");
+            Directory.CreateDirectory(paperResultsDirectory);
+            configPath = PaperConfigFactory.WriteEphemeralConfig(new JObject
+            {
+                ["alpaca-paper-trading"] = true,
+                ["log-handler"] = "QuantConnect.Logging.FileLogHandler",
+                ["results-destination-folder"] = paperResultsDirectory,
+                ["environments"] = new JObject
+                {
+                    ["live-alpaca"] = new JObject
+                    {
+                        ["live-mode"] = true,
+                        ["live-mode-brokerage"] = "AlpacaBrokerage"
+                    }
+                },
+                ["parameters"] = new JObject
+                {
+                    ["discovery.allow-paper-trading"] = "true",
+                    ["discovery.kill-switch-file"] = Path.GetFullPath(killSwitchPath)
+                }
+            });
+            Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, folder), Is.True);
+            Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, Path.Combine(folder, "different-stop"), folder), Is.False);
+            Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, Path.Combine(folder, "different-output")), Is.False);
+            var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 10, 40, 12, 4, 3, 30);
+            PaperProcessRecoveryGuard.Save(statePath, new PaperProcessIdentity(
+                processId,
+                startedAtUtc,
+                configPath,
+                genome,
+                0.12,
+                StrategyPopulation.Growth,
+                2));
+
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "recovery-test-key");
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "recovery-test-secret");
+            var settings = new SupervisorSettings
+            {
+                OutputDirectory = folder,
+                KillSwitchFile = killSwitchPath,
+                ReoptimizationIntervalHours = 1
+            };
+            using var cancellation = new CancellationTokenSource();
+            var host = new SupervisorHost(settings);
+            var run = host.RunAsync(cancellation.Token);
+            var adoptionObserved = await WaitForFileContentAsync(
+                Path.Combine(folder, "supervisor-audit.jsonl"),
+                "orphaned_paper_process_adopted",
+                TimeSpan.FromSeconds(15));
+            if (!adoptionObserved)
+            {
+                cancellation.Cancel();
+                try { await run.WaitAsync(TimeSpan.FromSeconds(15)); }
+                catch (Exception) { }
+            }
+            Assert.That(adoptionObserved, Is.True, "The supervisor did not adopt the verified surviving paper child.");
+            cancellation.Cancel();
+            Assert.ThrowsAsync<OperationCanceledException>(async () => await run.WaitAsync(TimeSpan.FromSeconds(15)));
+
+            Assert.That(adoptedChild.HasExited, Is.True, "The adopted child should exit after the supervisor's emergency-stop request.");
+            Assert.That(File.Exists(killSwitchPath), Is.True, "A shutdown stop marker should remain for operator review.");
+            Assert.That(File.Exists(statePath), Is.False, "The exited paper session marker should be cleared.");
+            Assert.That(File.Exists(donePath), Is.True, "The child should acknowledge that it observed the stop request.");
+            Assert.That(configPath, Is.Not.Null);
+            Assert.That(File.Exists(configPath!), Is.False, "The adopted session's temporary credential config should be deleted after exit.");
+            Assert.That(File.ReadAllText(Path.Combine(folder, "supervisor-audit.jsonl")), Does.Contain("orphaned_paper_process_adopted"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            if (adoptedChild is not null)
+            {
+                try
+                {
+                    if (!adoptedChild.HasExited) adoptedChild.Kill(entireProcessTree: true);
+                    await adoptedChild.WaitForExitAsync();
+                }
+                catch (InvalidOperationException) { }
+                finally { adoptedChild.Dispose(); }
+            }
+            if (configPath is not null && File.Exists(configPath)) PaperConfigFactory.DeleteEphemeralConfig(configPath);
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static async Task<bool> WaitForFileContentAsync(string path, string content, TimeSpan timeout)
+    {
+        var until = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < until)
+        {
+            if (File.Exists(path) && File.ReadAllText(path).Contains(content, StringComparison.Ordinal)) return true;
+            await Task.Delay(20);
+        }
+        return false;
     }
 
     [Test]

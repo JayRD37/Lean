@@ -11,6 +11,7 @@ public static class PaperConfigFactory
         string overlayPath,
         string algorithmTypeName,
         PromotedStrategy strategy,
+        string resultsDestinationFolder,
         string killSwitchPath,
         string alpacaApiKey,
         string alpacaApiSecret)
@@ -25,6 +26,8 @@ public static class PaperConfigFactory
         config["environment"] = "live-alpaca";
         config["algorithm-type-name"] = algorithmTypeName;
         config["algorithm-language"] = "CSharp";
+        config["results-destination-folder"] = Path.GetFullPath(resultsDestinationFolder);
+        config["log-handler"] = "QuantConnect.Logging.FileLogHandler";
         config["alpaca-api-key"] = alpacaApiKey;
         config["alpaca-api-secret"] = alpacaApiSecret;
         config["alpaca-paper-trading"] = true;
@@ -72,11 +75,46 @@ public static class PaperConfigFactory
     public static void DeleteEphemeralConfig(string path)
     {
         var fullPath = Path.GetFullPath(path);
-        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "LeanGeneticPaper")) + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        if (!IsEphemeralConfigPath(fullPath))
             throw new InvalidOperationException("Refusing to delete a config outside the supervisor's temporary paper-config directory.");
         var directory = Path.GetDirectoryName(fullPath)!;
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
+    public static bool IsEphemeralConfigPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "LeanGeneticPaper")) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsRecoverablePaperConfig(string? path, string killSwitchPath, string outputDirectory)
+    {
+        if (!IsEphemeralConfigPath(path) || !File.Exists(path)) return false;
+        try
+        {
+            var config = JObjectConfig.Read(path!);
+            var environment = config["environments"]?["live-alpaca"] as JObject;
+            var parameters = config["parameters"] as JObject;
+            var resultsDirectory = Path.GetFullPath(config["results-destination-folder"]?.Value<string>() ?? string.Empty);
+            var outputRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory)) + Path.DirectorySeparatorChar;
+            return config["alpaca-paper-trading"]?.Value<bool>() == true &&
+                config["log-handler"]?.Value<string>() == "QuantConnect.Logging.FileLogHandler" &&
+                resultsDirectory.StartsWith(outputRoot, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(resultsDirectory) &&
+                environment?["live-mode"]?.Value<bool>() == true &&
+                environment?["live-mode-brokerage"]?.Value<string>() == "AlpacaBrokerage" &&
+                parameters?["discovery.allow-paper-trading"]?.Value<string>() == "true" &&
+                string.Equals(
+                    Path.GetFullPath(parameters?["discovery.kill-switch-file"]?.Value<string>() ?? string.Empty),
+                    Path.GetFullPath(killSwitchPath),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            return false;
+        }
     }
 }
 

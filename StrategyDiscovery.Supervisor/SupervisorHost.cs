@@ -25,19 +25,37 @@ public sealed class SupervisorHost(SupervisorSettings settings)
 
         Directory.CreateDirectory(settings.OutputDirectory);
         using var instanceLock = SupervisorInstanceLock.Acquire(settings.OutputDirectory);
-        var orphan = PaperProcessRecoveryGuard.FindOrphan(_paperSessionStateFile, PaperProcessRecoveryGuard.GetProcessStartTimeUtc);
-        if (orphan is not null)
-        {
-            await AuditAsync("orphaned_paper_process_detected_fail_closed", new { orphan.ProcessId, orphan.StartedAtUtc }).ConfigureAwait(false);
-            throw new InvalidOperationException($"A previous LEAN paper process is still running (PID {orphan.ProcessId}, started {orphan.StartedAtUtc:O}). Inspect and stop or reconcile it before restarting the supervisor.");
-        }
-        if (File.Exists(settings.KillSwitchFile))
-            throw new InvalidOperationException($"Emergency stop is already present at '{settings.KillSwitchFile}'. Clear it only after investigating the stop request.");
-
         PaperSession? active = null;
         PromotedStrategy? activeStrategy = null;
         try
         {
+            var orphan = PaperProcessRecoveryGuard.FindOrphan(_paperSessionStateFile, PaperProcessRecoveryGuard.GetProcessStartTimeUtc);
+            if (orphan is not null)
+            {
+                if (!PaperConfigFactory.IsRecoverablePaperConfig(orphan.ConfigPath, settings.KillSwitchFile, settings.OutputDirectory))
+                {
+                    await AuditAsync("orphaned_paper_process_detected_fail_closed", new { orphan.ProcessId, orphan.StartedAtUtc }).ConfigureAwait(false);
+                    throw new InvalidOperationException($"A previous LEAN paper process is still running (PID {orphan.ProcessId}, started {orphan.StartedAtUtc:O}) but its session metadata cannot be verified. Inspect and reconcile it before restarting the supervisor.");
+                }
+
+                active = AdoptPaper(orphan);
+                if (orphan.Genome is not null && orphan.Fitness is { } fitness && orphan.Population is { } population)
+                    activeStrategy = new PromotedStrategy(orphan.Genome, fitness, population, orphan.ValidationWindowCount);
+                await AuditAsync("orphaned_paper_process_adopted", new { orphan.ProcessId, orphan.StartedAtUtc, genome = orphan.Genome }).ConfigureAwait(false);
+            }
+
+            if (File.Exists(settings.KillSwitchFile))
+            {
+                if (active is null)
+                    throw new InvalidOperationException($"Emergency stop is already present at '{settings.KillSwitchFile}'. Clear it only after investigating the stop request.");
+
+                await AuditAsync("adopted_paper_process_stopping_for_existing_emergency_stop", new { processId = active.Process.Id }).ConfigureAwait(false);
+                await active.Process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                await active.DisposeAsync().ConfigureAwait(false);
+                active = null;
+                return;
+            }
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 if (active is null)
@@ -195,11 +213,16 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         var optimizer = JObjectConfig.Read(settings.OptimizerConfig);
         var algorithmType = optimizer["algorithm-type-name"]?.Value<string>()
             ?? throw new InvalidDataException("Optimizer config does not specify algorithm-type-name.");
+        var started = DateTime.UtcNow;
+        var sessionId = started.ToString("yyyyMMdd-HHmmss-fffffff", System.Globalization.CultureInfo.InvariantCulture);
+        var resultsDirectory = Path.Combine(settings.OutputDirectory, $"paper-results-{sessionId}");
+        Directory.CreateDirectory(resultsDirectory);
         var config = PaperConfigFactory.Create(
             settings.LeanBaseConfig,
             settings.PaperConfigOverlay,
             algorithmType,
             strategy,
+            resultsDirectory,
             settings.KillSwitchFile,
             apiKey,
             apiSecret);
@@ -207,14 +230,20 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         Process? process = null;
         try
         {
-            var started = DateTime.UtcNow;
-            var logPath = Path.Combine(settings.OutputDirectory, $"paper-{started:yyyyMMdd-HHmmss}.log");
+            var logPath = Path.Combine(settings.OutputDirectory, $"paper-{sessionId}.log");
             process = StartProcess(
                 settings.LeanLauncherDll,
                 settings.LeanWorkingDirectory,
                 configPath,
                 logPath);
-            var identity = new PaperProcessIdentity(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()));
+            var identity = new PaperProcessIdentity(
+                process.Id,
+                new DateTimeOffset(process.StartTime.ToUniversalTime()),
+                configPath,
+                strategy.Genome,
+                strategy.Fitness,
+                strategy.Population,
+                strategy.ValidationWindowCount);
             PaperProcessRecoveryGuard.Save(_paperSessionStateFile, identity);
             AuditAsync("paper_process_started", new { strategy.Genome, strategy.Fitness, config = "ephemeral" }).GetAwaiter().GetResult();
             return new PaperSession(process, configPath, DateTimeOffset.UtcNow, _paperSessionStateFile, identity);
@@ -241,6 +270,25 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         var state = PortfolioDrawdownGuard.LoadState(statePath);
         if (state?.Tripped == true)
             throw new InvalidOperationException("The persistent account drawdown limit has tripped. Automatic optimization and paper restarts are disabled until an operator reviews the account and risk-state file.");
+    }
+
+    private PaperSession AdoptPaper(PaperProcessIdentity identity)
+    {
+        Process? process = null;
+        try
+        {
+            process = Process.GetProcessById(identity.ProcessId);
+            var actualStartTime = new DateTimeOffset(process.StartTime.ToUniversalTime());
+            if (process.HasExited || !PaperProcessRecoveryGuard.MatchesStartTime(identity, actualStartTime))
+                throw new InvalidOperationException("The recorded LEAN process changed while the supervisor was recovering it.");
+
+            return new PaperSession(process, identity.ConfigPath!, identity.StartedAtUtc, _paperSessionStateFile, identity);
+        }
+        catch
+        {
+            process?.Dispose();
+            throw;
+        }
     }
 
     private async Task<int> RunChildAsync(string launcherDll, string workingDirectory, string configPath, string logPath, CancellationToken cancellationToken)

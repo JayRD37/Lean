@@ -1,9 +1,17 @@
 using System.Diagnostics;
 using Newtonsoft.Json;
+using QuantConnect.Genetic;
 
 namespace QuantConnect.Genetic.Supervisor;
 
-public sealed record PaperProcessIdentity(int ProcessId, DateTimeOffset StartedAtUtc);
+public sealed record PaperProcessIdentity(
+    int ProcessId,
+    DateTimeOffset StartedAtUtc,
+    string? ConfigPath = null,
+    StrategyGenome? Genome = null,
+    double? Fitness = null,
+    StrategyPopulation? Population = null,
+    int ValidationWindowCount = 0);
 
 /// <summary>Detects orphaned LEAN paper children so a restarted supervisor cannot create a duplicate session.</summary>
 public static class PaperProcessRecoveryGuard
@@ -28,13 +36,20 @@ public static class PaperProcessRecoveryGuard
 
         if (identity.ProcessId < 1) throw new InvalidDataException("Active paper session state contains an invalid process ID.");
         var actualStartTime = getProcessStartTimeUtc(identity.ProcessId);
-        if (actualStartTime is null || (actualStartTime.Value - identity.StartedAtUtc).Duration() > ProcessStartTimeTolerance)
+        if (actualStartTime is null || !MatchesStartTime(identity, actualStartTime.Value))
         {
+            DeleteEphemeralConfig(identity.ConfigPath);
             File.Delete(statePath);
             return null;
         }
 
         return identity;
+    }
+
+    public static bool MatchesStartTime(PaperProcessIdentity identity, DateTimeOffset actualStartTimeUtc)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        return (actualStartTimeUtc - identity.StartedAtUtc).Duration() <= ProcessStartTimeTolerance;
     }
 
     public static void Save(string statePath, PaperProcessIdentity identity)
@@ -57,6 +72,11 @@ public static class PaperProcessRecoveryGuard
     {
         var current = FindOrphan(statePath, processId => processId == identity.ProcessId ? identity.StartedAtUtc : null);
         if (current == identity && File.Exists(statePath)) File.Delete(statePath);
+    }
+
+    private static void DeleteEphemeralConfig(string? configPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configPath)) PaperConfigFactory.DeleteEphemeralConfig(configPath);
     }
 
     public static DateTimeOffset? GetProcessStartTimeUtc(int processId)
