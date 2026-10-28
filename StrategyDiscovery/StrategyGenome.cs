@@ -34,6 +34,9 @@ public sealed record StrategyGenome(
     int MaxPositions,
     int MaxExposurePercent)
 {
+    /// <summary>Optional slower trend/regime filter evaluated alongside the primary signal timeframe.</summary>
+    public StrategyTimeframe? ConfirmationTimeframe { get; init; }
+
     public const int MinFastPeriod = 3;
     public const int MaxFastPeriod = 30;
     public const int MinSlowPeriod = 15;
@@ -44,6 +47,7 @@ public sealed record StrategyGenome(
     public const int MaxMaxPositions = 5;
     public const int MinExposurePct = 20;
     public const int MaxExposurePct = 80;
+    public const int MaxParameterNeighborhoodSize = 10;
 
     public double EntryThreshold => EntryThresholdTenths / 10d;
     public double ExitThreshold => ExitThresholdTenths / 10d;
@@ -63,7 +67,10 @@ public sealed record StrategyGenome(
             this with { EntryThresholdTenths = EntryThresholdTenths + 1 },
             this with { ExitThresholdTenths = ExitThresholdTenths - 1 },
             this with { ExitThresholdTenths = ExitThresholdTenths + 1 }
-        };
+        }.Concat(allowedTimeframes
+            .Where(timeframe => timeframe > Timeframe)
+            .Select(timeframe => this with { ConfirmationTimeframe = timeframe }))
+            .Append(this with { ConfirmationTimeframe = null });
 
         return candidates
             .Select(candidate => candidate.Normalize(allowedTimeframes))
@@ -95,10 +102,15 @@ public sealed record StrategyGenome(
         var entry = Math.Clamp(EntryThresholdTenths, MinEntryThresholdTenths, MaxEntryThresholdTenths);
         var exit = Math.Clamp(ExitThresholdTenths, 1, entry - 1);
         var timeframe = allowedTimeframes.Contains(Timeframe) ? Timeframe : allowedTimeframes[0];
+        StrategyTimeframe? confirmationTimeframe = ConfirmationTimeframe is { } confirmation &&
+                                     allowedTimeframes.Contains(confirmation) && confirmation > timeframe
+            ? confirmation
+            : null;
 
         return this with
         {
             Timeframe = timeframe,
+            ConfirmationTimeframe = confirmationTimeframe,
             FastPeriod = fast,
             SlowPeriod = slow,
             EntryThresholdTenths = entry,
@@ -123,6 +135,7 @@ public sealed record StrategyDiscoveryOptions
     public int MinimumTrades { get; init; } = 5;
     public double MaximumDrawdown { get; init; } = 0.20;
     public IReadOnlyList<StrategyTimeframe> AllowedTimeframes { get; init; } = [StrategyTimeframe.Daily, StrategyTimeframe.Hour];
+    public bool EnableMultiTimeframeConfirmation { get; init; } = true;
 
     public void Validate()
     {
@@ -172,3 +185,4 @@ public sealed record DiscoveryCandidate(
     int Generation,
     StrategyPopulation Population,
     StrategyGenome Genome);
+

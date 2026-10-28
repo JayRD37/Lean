@@ -168,6 +168,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
                 ["discovery.generation"] = candidate.Generation.ToString(CultureInfo.InvariantCulture),
                 ["discovery.family"] = genome.Family.ToString(),
                 ["discovery.timeframe"] = genome.Timeframe.ToString(),
+                ["discovery.confirmation-timeframe"] = genome.ConfirmationTimeframe?.ToString() ?? "None",
                 ["discovery.fast-period"] = genome.FastPeriod.ToString(CultureInfo.InvariantCulture),
                 ["discovery.slow-period"] = genome.SlowPeriod.ToString(CultureInfo.InvariantCulture),
                 ["discovery.entry-tenths"] = genome.EntryThresholdTenths.ToString(CultureInfo.InvariantCulture),
@@ -249,6 +250,7 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             ["discovery.generation"] = candidate.Generation.ToString(CultureInfo.InvariantCulture),
             ["discovery.family"] = genome.Family.ToString(),
             ["discovery.timeframe"] = genome.Timeframe.ToString(),
+            ["discovery.confirmation-timeframe"] = genome.ConfirmationTimeframe?.ToString() ?? "None",
             ["discovery.fast-period"] = genome.FastPeriod.ToString(CultureInfo.InvariantCulture),
             ["discovery.slow-period"] = genome.SlowPeriod.ToString(CultureInfo.InvariantCulture),
             ["discovery.entry-tenths"] = genome.EntryThresholdTenths.ToString(CultureInfo.InvariantCulture),
@@ -513,4 +515,5 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
         public List<ValidationFold> Folds { get; } = new((1 + probeGenomes.Count) * expectedWindowCount);
     }
 }
+
 

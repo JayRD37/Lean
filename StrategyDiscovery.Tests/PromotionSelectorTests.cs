@@ -105,7 +105,10 @@ public class PromotionSelectorTests
             var overlayPath = Path.Combine(directory, "overlay.json");
             File.WriteAllText(basePath, "{\"environment\":\"backtesting\",\"algorithm-type-name\":\"Basic\",\"environments\":{}}");
             File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
-            var genome = new StrategyGenome(StrategyFamily.MeanReversion, StrategyTimeframe.Hour, 9, 35, 14, 3, 2, 25);
+            var genome = new StrategyGenome(StrategyFamily.MeanReversion, StrategyTimeframe.Hour, 9, 35, 14, 3, 2, 25)
+            {
+                ConfirmationTimeframe = StrategyTimeframe.Daily
+            };
             var selected = new PromotedStrategy(genome, 0.5, StrategyPopulation.Consistency, 3);
 
             var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, Path.Combine(directory, "stop"), "paper-key", "paper-secret");
@@ -116,6 +119,7 @@ public class PromotionSelectorTests
             Assert.That(config["parameters"]?["discovery.allow-paper-trading"]?.Value<string>(), Is.EqualTo("true"));
             Assert.That(config["parameters"]?["discovery.family"]?.Value<string>(), Is.EqualTo("MeanReversion"));
             Assert.That(config["parameters"]?["discovery.timeframe"]?.Value<string>(), Is.EqualTo("Hour"));
+            Assert.That(config["parameters"]?["discovery.confirmation-timeframe"]?.Value<string>(), Is.EqualTo("Daily"));
             Assert.That(config["parameters"]?["discovery.fast-period"]?.Value<string>(), Is.EqualTo("9"));
             Assert.That(config["parameters"]?["discovery.drawdown-state-file"]?.Value<string>(),
                 Is.EqualTo(Path.Combine(directory, "portfolio-drawdown-state.json")));
@@ -266,3 +270,4 @@ public class PromotionSelectorTests
         ["Windows"] = new JArray(windows)
     };
 }
+

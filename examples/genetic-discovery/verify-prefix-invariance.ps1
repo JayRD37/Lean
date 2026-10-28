@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol, [string] $Timeframe = 'Daily', [string] $ConfirmationTimeframe = 'None') {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -46,7 +46,8 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
         'discovery.train-start' = $StartDate
         'discovery.train-end' = $EndDate
         'discovery.symbols' = $Symbol
-        'discovery.timeframe' = 'Daily'
+        'discovery.timeframe' = $Timeframe
+        'discovery.confirmation-timeframe' = $ConfirmationTimeframe
         'discovery.family' = 'TrendFollowing'
         'discovery.fast-period' = '10'
         'discovery.slow-period' = '40'
@@ -160,6 +161,7 @@ $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
+$multiTimeframe = Run-Backtest 'multi-timeframe' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
 Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
@@ -180,11 +182,16 @@ $splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate 
 if ($splitLine -notmatch 'holdingQuantity=(-?[0-9.]+)' -or [decimal]$Matches[1] -eq 0) { throw "AAPL had no open position during the split event; inspect $($corporateActions.AlgorithmLogPath)" }
 if ($actionsLog -notmatch 'Corporate action: dividend symbol=AAPL distribution=') { throw "LEAN did not deliver an AAPL dividend event; inspect $($corporateActions.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN delivered AAPL split and dividend events through the adjusted-data strategy run."
+$multiTimeframeLog = Get-Content -LiteralPath $multiTimeframe.AlgorithmLogPath -Raw
+if ($multiTimeframeLog -notmatch 'Multi-timeframe confirmation ready: symbol=SPY primary=Hour confirmation=Daily') { throw "Daily confirmation indicators never became ready on the hourly SPY subscription; inspect $($multiTimeframe.AlgorithmLogPath)" }
+if ($multiTimeframeLog -match 'Execution safety gate tripped') { throw "Multi-timeframe backtest hit an invalid order; inspect $($multiTimeframe.AlgorithmLogPath)" }
+Write-Output "PASS: LEAN aggregated daily confirmation indicators over hourly SPY data and reached readiness."
 Write-Output "PASS: LEAN adjusted one AAPL share to four and credited a dividend under raw normalization."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
 Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"
+
 
 
 

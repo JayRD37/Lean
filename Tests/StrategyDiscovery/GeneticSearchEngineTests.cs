@@ -41,6 +41,25 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void CandidateGenerationEvolvesOnlySlowerConfirmationTimeframes()
+    {
+        var options = CreateOptions() with
+        {
+            PopulationSize = 32,
+            GenerationCount = 1,
+            RandomBaselineSize = 0,
+            EliteCount = 0,
+            AllowedTimeframes = [StrategyTimeframe.Minute, StrategyTimeframe.Hour, StrategyTimeframe.Daily]
+        };
+
+        var candidates = new GeneticSearchEngine(options).Start();
+
+        Assert.That(candidates.Any(candidate => candidate.Genome.ConfirmationTimeframe.HasValue), Is.True);
+        Assert.That(candidates.All(candidate => candidate.Genome.ConfirmationTimeframe is null ||
+            candidate.Genome.ConfirmationTimeframe > candidate.Genome.Timeframe), Is.True);
+    }
+
+    [Test]
     public void CandidateGenerationRespectsConfiguredPaperPositionAndExposureCaps()
     {
         var options = CreateOptions() with { MaximumPositions = 3, MaximumExposurePercent = 30 };
@@ -283,6 +302,22 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void GenomeNormalizationDropsInvalidOrFasterConfirmationTimeframes()
+    {
+        var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Hour, 10, 40, 12, 4, 3, 50)
+        {
+            ConfirmationTimeframe = StrategyTimeframe.Minute
+        };
+
+        var normalized = genome.Normalize([StrategyTimeframe.Minute, StrategyTimeframe.Hour, StrategyTimeframe.Daily]);
+
+        Assert.That(normalized.ConfirmationTimeframe, Is.Null);
+        Assert.That((genome with { ConfirmationTimeframe = StrategyTimeframe.Daily })
+            .Normalize([StrategyTimeframe.Minute, StrategyTimeframe.Hour, StrategyTimeframe.Daily]).ConfirmationTimeframe,
+            Is.EqualTo(StrategyTimeframe.Daily));
+    }
+
+    [Test]
     public void ParameterNeighborhoodProducesDeterministicDistinctValidNeighbors()
     {
         var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 10, 40, 12, 4, 3, 50);
@@ -295,6 +330,16 @@ public class GeneticSearchEngineTests
         Assert.That(first.Distinct().Count(), Is.EqualTo(first.Count));
         Assert.That(first.All(candidate => candidate.FastPeriod >= StrategyGenome.MinFastPeriod &&
             candidate.SlowPeriod > candidate.FastPeriod && candidate.ExitThresholdTenths < candidate.EntryThresholdTenths), Is.True);
+    }
+
+    [Test]
+    public void ParameterNeighborhoodCanProbeHigherTimeframeConfirmation()
+    {
+        var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Hour, 10, 40, 12, 4, 3, 50);
+
+        var neighbors = genome.CreateParameterNeighborhood(9, [StrategyTimeframe.Hour, StrategyTimeframe.Daily]);
+
+        Assert.That(neighbors.Any(candidate => candidate.ConfirmationTimeframe == StrategyTimeframe.Daily), Is.True);
     }
 
     [Test]
@@ -371,3 +416,4 @@ public class GeneticSearchEngineTests
         return new StrategyBacktestMetrics(0.10 + periodEffect, 1.2, 0.08, 0.55, 40, 0.20);
     }
 }
+

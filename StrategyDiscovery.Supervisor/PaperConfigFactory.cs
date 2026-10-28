@@ -44,6 +44,7 @@ public static class PaperConfigFactory
         parameters["discovery.phase"] = "Validation";
         parameters["discovery.family"] = strategy.Genome.Family.ToString();
         parameters["discovery.timeframe"] = strategy.Genome.Timeframe.ToString();
+        parameters["discovery.confirmation-timeframe"] = strategy.Genome.ConfirmationTimeframe?.ToString() ?? "None";
         parameters["discovery.fast-period"] = strategy.Genome.FastPeriod.ToString(System.Globalization.CultureInfo.InvariantCulture);
         parameters["discovery.slow-period"] = strategy.Genome.SlowPeriod.ToString(System.Globalization.CultureInfo.InvariantCulture);
         parameters["discovery.entry-tenths"] = strategy.Genome.EntryThresholdTenths.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -78,3 +79,4 @@ public static class PaperConfigFactory
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
 }
+

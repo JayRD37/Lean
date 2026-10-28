@@ -24,6 +24,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("monte-carlo-simulation-count")] public int MonteCarloSimulationCount { get; set; } = 1000;
     [JsonProperty("maximum-drawdown")] public double MaximumDrawdown { get; set; } = 0.20;
     [JsonProperty("allowed-timeframes")] public string AllowedTimeframes { get; set; } = "Daily,Hour";
+    [JsonProperty("enable-multi-timeframe-confirmation")] public bool EnableMultiTimeframeConfirmation { get; set; } = true;
     [JsonProperty("symbols")] public string Symbols { get; set; } = "SPY,QQQ,IWM";
     [JsonProperty("maximum-correlation")] public double MaximumCorrelation { get; set; } = 0.85;
     [JsonProperty("maximum-portfolio-drawdown")] public double MaximumPortfolioDrawdown { get; set; } = 0.10;
@@ -59,7 +60,8 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
             MaximumExposurePercent = MaximumExposurePercent,
             MinimumTrades = MinimumTrades,
             MaximumDrawdown = MaximumDrawdown,
-            AllowedTimeframes = timeframes
+            AllowedTimeframes = timeframes,
+            EnableMultiTimeframeConfirmation = EnableMultiTimeframeConfirmation
         };
         options.Validate();
         if (MonteCarloSimulationCount < 1) throw new ArgumentOutOfRangeException(nameof(MonteCarloSimulationCount), "MonteCarloSimulationCount must be positive.");
@@ -80,9 +82,9 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         if (ValidationFinalistCount < 1) throw new ArgumentOutOfRangeException(nameof(ValidationFinalistCount), "At least one evolved strategy must be validated.");
         if (ValidationBaselineCount < 0) throw new ArgumentOutOfRangeException(nameof(ValidationBaselineCount), "ValidationBaselineCount cannot be negative.");
         if (ValidationWindowCount < 1) throw new ArgumentOutOfRangeException(nameof(ValidationWindowCount), "At least one chronological validation window is required.");
-        if (ParameterRobustnessProbeCount < 0 || ParameterRobustnessProbeCount > 8)
+        if (ParameterRobustnessProbeCount < 0 || ParameterRobustnessProbeCount > StrategyGenome.MaxParameterNeighborhoodSize)
         {
-            throw new ArgumentOutOfRangeException(nameof(ParameterRobustnessProbeCount), "ParameterRobustnessProbeCount must be between zero and eight.");
+            throw new ArgumentOutOfRangeException(nameof(ParameterRobustnessProbeCount), $"ParameterRobustnessProbeCount must be between zero and {StrategyGenome.MaxParameterNeighborhoodSize}.");
         }
         var trainingStart = DateOnly.ParseExact(TrainingStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         var trainingEnd = DateOnly.ParseExact(TrainingEndDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -106,3 +108,4 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
         .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
         .Select(symbol => symbol.ToUpper(CultureInfo.InvariantCulture)));
 }
+

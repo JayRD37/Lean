@@ -153,15 +153,25 @@ public sealed class GeneticSearchEngine
         var fast = _random.Next(StrategyGenome.MinFastPeriod, StrategyGenome.MaxFastPeriod + 1);
         var slow = _random.Next(Math.Max(StrategyGenome.MinSlowPeriod, fast + 2), StrategyGenome.MaxSlowPeriod + 1);
         var entry = _random.Next(StrategyGenome.MinEntryThresholdTenths, StrategyGenome.MaxEntryThresholdTenths + 1);
+        var timeframe = _options.AllowedTimeframes[_random.Next(_options.AllowedTimeframes.Count)];
+        var higherTimeframes = _options.EnableMultiTimeframeConfirmation
+            ? _options.AllowedTimeframes.Where(candidate => candidate > timeframe).ToArray()
+            : Array.Empty<StrategyTimeframe>();
+        var confirmationTimeframe = higherTimeframes.Length > 0 && _random.Next(2) == 0
+            ? higherTimeframes[_random.Next(higherTimeframes.Length)]
+            : (StrategyTimeframe?)null;
         return new StrategyGenome(
             RandomEnum<StrategyFamily>(),
-            _options.AllowedTimeframes[_random.Next(_options.AllowedTimeframes.Count)],
+            timeframe,
             fast,
             slow,
             entry,
             _random.Next(1, entry),
             _random.Next(StrategyGenome.MinMaxPositions, _options.MaximumPositions + 1),
-            _random.Next(StrategyGenome.MinExposurePct, _options.MaximumExposurePercent + 1));
+            _random.Next(StrategyGenome.MinExposurePct, _options.MaximumExposurePercent + 1))
+        {
+            ConfirmationTimeframe = confirmationTimeframe
+        };
     }
 
     private StrategyGenome Crossover(StrategyGenome first, StrategyGenome second)
@@ -174,13 +184,30 @@ public sealed class GeneticSearchEngine
             Pick(first.EntryThresholdTenths, second.EntryThresholdTenths),
             Pick(first.ExitThresholdTenths, second.ExitThresholdTenths),
             Pick(first.MaxPositions, second.MaxPositions),
-            Pick(first.MaxExposurePercent, second.MaxExposurePercent));
+            Pick(first.MaxExposurePercent, second.MaxExposurePercent))
+        {
+            ConfirmationTimeframe = Pick(first.ConfirmationTimeframe, second.ConfirmationTimeframe)
+        };
     }
 
     private StrategyGenome Mutate(StrategyGenome genome)
     {
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { Family = RandomEnum<StrategyFamily>() };
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { Timeframe = _options.AllowedTimeframes[_random.Next(_options.AllowedTimeframes.Count)] };
+        if (_options.EnableMultiTimeframeConfirmation && _random.NextDouble() < _options.MutationRate)
+        {
+            var higherTimeframes = _options.AllowedTimeframes.Where(timeframe => timeframe > genome.Timeframe).ToArray();
+            genome = genome with
+            {
+                ConfirmationTimeframe = higherTimeframes.Length == 0 || _random.Next(2) == 0
+                    ? null
+                    : higherTimeframes[_random.Next(higherTimeframes.Length)]
+            };
+        }
+        else if (!_options.EnableMultiTimeframeConfirmation)
+        {
+            genome = genome with { ConfirmationTimeframe = null };
+        }
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { FastPeriod = _random.Next(StrategyGenome.MinFastPeriod, StrategyGenome.MaxFastPeriod + 1) };
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { SlowPeriod = _random.Next(StrategyGenome.MinSlowPeriod, StrategyGenome.MaxSlowPeriod + 1) };
         if (_random.NextDouble() < _options.MutationRate) genome = genome with { EntryThresholdTenths = _random.Next(StrategyGenome.MinEntryThresholdTenths, StrategyGenome.MaxEntryThresholdTenths + 1) };
@@ -245,3 +272,4 @@ public sealed class GeneticSearchEngine
         }
     }
 }
+
