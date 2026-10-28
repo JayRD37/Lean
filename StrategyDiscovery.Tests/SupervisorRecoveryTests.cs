@@ -320,6 +320,159 @@ public class SupervisorRecoveryTests
         }
     }
 
+    [Test]
+    public async Task SupervisorRestartsAnUnexpectedlyExitedLeanChildAndStopsAtTheEmergencyFile()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "lean-paper-unexpected-exit-" + Guid.NewGuid().ToString("N"));
+        var optimizerDirectory = Path.Combine(folder, "optimizer");
+        var leanDirectory = Path.Combine(folder, "lean");
+        var pluginDirectory = Path.Combine(folder, "alpaca-plugin");
+        var outputDirectory = Path.Combine(folder, "output");
+        Directory.CreateDirectory(optimizerDirectory);
+        Directory.CreateDirectory(leanDirectory);
+        Directory.CreateDirectory(pluginDirectory);
+        File.WriteAllText(Path.Combine(pluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+        File.WriteAllText(Path.Combine(pluginDirectory, "Alpaca.Markets.dll"), string.Empty);
+
+        var fixtureAssembly = Path.Combine(TestContext.CurrentContext.TestDirectory, "QuantConnect.Genetic.ProcessFixture.dll");
+        Assert.That(File.Exists(fixtureAssembly), Is.True, $"Process fixture was not copied to {TestContext.CurrentContext.TestDirectory}");
+        var statePath = Path.Combine(folder, "fixture-events.txt");
+        var resultsDirectory = Path.Combine(optimizerDirectory, "results");
+        var optimizerConfigPath = Path.Combine(optimizerDirectory, "optimizer.json");
+        File.WriteAllText(optimizerConfigPath, new JObject
+        {
+            ["algorithm-type-name"] = "GeneticDiscoveryAlgorithm",
+            ["results-destination-folder"] = resultsDirectory,
+            ["fixture-mode"] = "optimizer",
+            ["fixture-state-file"] = statePath
+        }.ToString());
+
+        var baseConfigPath = Path.Combine(folder, "base.json");
+        File.WriteAllText(baseConfigPath, new JObject
+        {
+            ["environment"] = "backtesting",
+            ["algorithm-type-name"] = "GeneticDiscoveryAlgorithm",
+            ["fixture-mode"] = "paper",
+            ["fixture-state-file"] = statePath,
+            ["environments"] = new JObject
+            {
+                ["live-alpaca"] = new JObject
+                {
+                    ["live-mode"] = true,
+                    ["live-mode-brokerage"] = "AlpacaBrokerage"
+                }
+            }
+        }.ToString());
+        var overlayPath = Path.Combine(folder, "overlay.json");
+        File.WriteAllText(overlayPath, new JObject
+        {
+            ["alpaca-paper-trading"] = true,
+            ["parameters"] = new JObject
+            {
+                ["discovery.max-positions"] = "3",
+                ["discovery.max-exposure-percent"] = "30",
+                ["discovery.minimum-spread-bps"] = "5",
+                ["discovery.max-correlation"] = "0.80",
+                ["discovery.max-drawdown"] = "0.08",
+                ["discovery.symbols"] = "SPY|QQQ|IWM"
+            }
+        }.ToString());
+
+        var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
+        var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        var settings = new SupervisorSettings
+        {
+            DotnetExecutable = string.IsNullOrWhiteSpace(dotnetHost) ? "dotnet" : dotnetHost,
+            OptimizerLauncherDll = fixtureAssembly,
+            OptimizerWorkingDirectory = optimizerDirectory,
+            OptimizerConfig = optimizerConfigPath,
+            LeanLauncherDll = fixtureAssembly,
+            LeanWorkingDirectory = leanDirectory,
+            LeanBaseConfig = baseConfigPath,
+            PaperConfigOverlay = overlayPath,
+            AlpacaPluginDirectory = pluginDirectory,
+            OutputDirectory = outputDirectory,
+            KillSwitchFile = Path.Combine(folder, "emergency-stop"),
+            ReoptimizationIntervalHours = 1,
+            MaximumConsecutivePaperFailures = 3,
+            MinimumHealthyPaperRunMinutes = 5,
+            RestartBackoffSeconds = 1
+        };
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Task? run = null;
+        int? secondChildId = null;
+        Process? secondChildProcess = null;
+        string? secondConfigPath = null;
+        try
+        {
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "restart-test-paper-key");
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "restart-test-paper-secret");
+            var host = new SupervisorHost(settings);
+            run = host.RunAsync(cancellation.Token);
+
+            Assert.That(await WaitForFileContentAsync(statePath, "paper|1|", TimeSpan.FromSeconds(15)), Is.True,
+                "The first paper child did not start.");
+            var firstChildId = ReadPaperChildIds(statePath)[0];
+            using (var failedChild = Process.GetProcessById(firstChildId))
+            {
+                failedChild.Kill(entireProcessTree: true);
+                await failedChild.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            Assert.That(await WaitForFileContentAsync(statePath, "paper|2|", TimeSpan.FromSeconds(15)), Is.True,
+                "The supervisor did not restart the paper child after its unexpected exit.");
+            secondChildId = ReadPaperChildIds(statePath)[1];
+            secondChildProcess = Process.GetProcessById(secondChildId.Value);
+            var sessionPath = Path.Combine(outputDirectory, "active-paper-session.json");
+            Assert.That(await WaitForFileContentAsync(sessionPath, "\"ProcessId\"", TimeSpan.FromSeconds(5)), Is.True);
+            secondConfigPath = JObject.Parse(File.ReadAllText(sessionPath))["ConfigPath"]?.Value<string>();
+            Assert.That(secondConfigPath, Is.Not.Null);
+            Assert.That(File.Exists(secondConfigPath), Is.True);
+
+            var audit = Path.Combine(outputDirectory, "supervisor-audit.jsonl");
+            Assert.That(await WaitForFileContentAsync(audit, "paper_process_restart_scheduled", TimeSpan.FromSeconds(5)), Is.True);
+            File.WriteAllText(settings.KillSwitchFile, "operator-requested paper stop");
+            await run.WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.That(secondChildProcess.HasExited, Is.True);
+            Assert.That(File.Exists(sessionPath), Is.False, "The stopped paper-session marker should be cleared.");
+            Assert.That(File.Exists(secondConfigPath!), Is.False, "The stopped session's ephemeral credential config should be deleted.");
+            var events = File.ReadAllLines(statePath);
+            Assert.That(events.Count(line => line.StartsWith("optimizer|", StringComparison.Ordinal)), Is.EqualTo(1));
+            Assert.That(events.Count(line => line.StartsWith("paper|", StringComparison.Ordinal)), Is.EqualTo(2));
+            Assert.That(File.ReadAllText(audit), Does.Contain("external_emergency_stop_honored"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
+            Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            if (run is not null && !run.IsCompleted)
+            {
+                File.WriteAllText(settings.KillSwitchFile, "test cleanup");
+                cancellation.Cancel();
+                try { await run.WaitAsync(TimeSpan.FromSeconds(15)); }
+                catch (Exception) { }
+            }
+            if (secondChildProcess is not null)
+            {
+                try
+                {
+                    if (!secondChildProcess.HasExited) secondChildProcess.Kill(entireProcessTree: true);
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or ArgumentException) { }
+                finally { secondChildProcess.Dispose(); }
+            }
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static int[] ReadPaperChildIds(string path) => File.ReadAllLines(path)
+        .Where(line => line.StartsWith("paper|", StringComparison.Ordinal))
+        .Select(line => int.Parse(line.Split('|')[2], CultureInfo.InvariantCulture))
+        .ToArray();
+
     private static async Task<bool> WaitForFileContentAsync(string path, string content, TimeSpan timeout)
     {
         var until = DateTime.UtcNow + timeout;
