@@ -7,6 +7,7 @@ namespace QuantConnect.Genetic.Supervisor;
 public sealed class SupervisorHost(SupervisorSettings settings)
 {
     private readonly string _auditFile = Path.Combine(settings.OutputDirectory, "supervisor-audit.jsonl");
+    private readonly string _paperSessionStateFile = Path.Combine(settings.OutputDirectory, "active-paper-session.json");
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private readonly PaperRestartPolicy _restartPolicy = new(
         settings.MaximumConsecutivePaperFailures,
@@ -23,6 +24,13 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             throw new InvalidOperationException("Set ALGORY_ALPACA_API_KEY and ALGORY_ALPACA_API_SECRET before starting paper trading.");
 
         Directory.CreateDirectory(settings.OutputDirectory);
+        using var instanceLock = SupervisorInstanceLock.Acquire(settings.OutputDirectory);
+        var orphan = PaperProcessRecoveryGuard.FindOrphan(_paperSessionStateFile, PaperProcessRecoveryGuard.GetProcessStartTimeUtc);
+        if (orphan is not null)
+        {
+            await AuditAsync("orphaned_paper_process_detected_fail_closed", new { orphan.ProcessId, orphan.StartedAtUtc }).ConfigureAwait(false);
+            throw new InvalidOperationException($"A previous LEAN paper process is still running (PID {orphan.ProcessId}, started {orphan.StartedAtUtc:O}). Inspect and stop or reconcile it before restarting the supervisor.");
+        }
         if (File.Exists(settings.KillSwitchFile))
             throw new InvalidOperationException($"Emergency stop is already present at '{settings.KillSwitchFile}'. Clear it only after investigating the stop request.");
 
@@ -194,20 +202,32 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             apiKey,
             apiSecret);
         var configPath = PaperConfigFactory.WriteEphemeralConfig(config);
+        Process? process = null;
         try
         {
             var started = DateTime.UtcNow;
             var logPath = Path.Combine(settings.OutputDirectory, $"paper-{started:yyyyMMdd-HHmmss}.log");
-            var process = StartProcess(
+            process = StartProcess(
                 settings.LeanLauncherDll,
                 settings.LeanWorkingDirectory,
                 configPath,
                 logPath);
+            var identity = new PaperProcessIdentity(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()));
+            PaperProcessRecoveryGuard.Save(_paperSessionStateFile, identity);
             AuditAsync("paper_process_started", new { strategy.Genome, strategy.Fitness, config = "ephemeral" }).GetAwaiter().GetResult();
-            return new PaperSession(process, configPath, DateTimeOffset.UtcNow);
+            return new PaperSession(process, configPath, DateTimeOffset.UtcNow, _paperSessionStateFile, identity);
         }
         catch
         {
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                    process.WaitForExit();
+                }
+                finally { process.Dispose(); }
+            }
             PaperConfigFactory.DeleteEphemeralConfig(configPath);
             throw;
         }
@@ -310,7 +330,12 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         }
     }
 
-    private sealed class PaperSession(Process process, string configPath, DateTimeOffset startedAt) : IAsyncDisposable
+    private sealed class PaperSession(
+        Process process,
+        string configPath,
+        DateTimeOffset startedAt,
+        string statePath,
+        PaperProcessIdentity identity) : IAsyncDisposable
     {
         public Process Process { get; } = process;
         public TimeSpan Uptime => DateTimeOffset.UtcNow - startedAt;
@@ -318,8 +343,12 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         public async ValueTask DisposeAsync()
         {
             if (!Process.HasExited) await Process.WaitForExitAsync().ConfigureAwait(false);
-            Process.Dispose();
-            PaperConfigFactory.DeleteEphemeralConfig(configPath);
+            try { PaperProcessRecoveryGuard.ClearIfOwned(statePath, identity); }
+            finally
+            {
+                Process.Dispose();
+                PaperConfigFactory.DeleteEphemeralConfig(configPath);
+            }
         }
     }
 }
