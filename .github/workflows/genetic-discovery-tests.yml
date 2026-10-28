@@ -50,5 +50,8 @@ jobs:
         with:
           dotnet-version: 10.0.403
 
+      - name: Build the full LEAN solution
+        run: dotnet build QuantConnect.Lean.sln --configuration Release --verbosity quiet /p:WarningLevel=1
+
       - name: Run genetic discovery and supervisor tests
-        run: dotnet test StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --verbosity minimal
+        run: dotnet test StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --no-build --verbosity minimal
