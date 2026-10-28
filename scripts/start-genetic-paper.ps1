@@ -30,13 +30,30 @@ $previousKey = [Environment]::GetEnvironmentVariable($keyVariable, "Process")
 $previousSecret = [Environment]::GetEnvironmentVariable($secretVariable, "Process")
 $keySecure = $null
 $secretSecure = $null
+$storedCredentials = $null
 $keyPointer = [IntPtr]::Zero
 $secretPointer = [IntPtr]::Zero
 $exitCode = 1
+$credentialFile = Join-Path $env:LOCALAPPDATA "AlgoryLean/alpaca-paper.credentials.json.dpapi"
 
 try {
-    $keySecure = Read-Host "Alpaca PAPER API key (input hidden)" -AsSecureString
-    $secretSecure = Read-Host "Alpaca PAPER API secret (input hidden)" -AsSecureString
+    if (Test-Path -LiteralPath $credentialFile) {
+        try {
+            $storedCredentials = Get-Content -LiteralPath $credentialFile -Raw | ConvertFrom-Json
+            if ($storedCredentials.endpoint -ne "https://paper-api.alpaca.markets/v2") {
+                throw "Stored credentials are not configured for the Alpaca paper endpoint."
+            }
+            $keySecure = ConvertTo-SecureString -String $storedCredentials.key
+            $secretSecure = ConvertTo-SecureString -String $storedCredentials.secret
+        }
+        catch {
+            throw "Could not read the Windows-protected Alpaca paper credentials for this Windows account. Run scripts/check-alpaca-paper.ps1 to enter and verify them again."
+        }
+    }
+    else {
+        $keySecure = Read-Host "Alpaca PAPER API key (input hidden)" -AsSecureString
+        $secretSecure = Read-Host "Alpaca PAPER API secret (input hidden)" -AsSecureString
+    }
     if ($keySecure.Length -eq 0 -or $secretSecure.Length -eq 0) {
         throw "Both paper credentials are required."
     }
@@ -60,9 +77,11 @@ finally {
     if ($secretPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer) }
     if ($null -ne $keySecure) { $keySecure.Dispose() }
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
+    $storedCredentials = $null
     [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $previousDotnetRoot, "Process")
     [Environment]::SetEnvironmentVariable("PATH", $previousPath, "Process")
 }
 
 exit $exitCode
+
 
