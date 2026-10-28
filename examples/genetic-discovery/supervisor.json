@@ -11,6 +11,8 @@
   "output-directory": "../../supervisor-output",
   "kill-switch-file": "../../Launcher/bin/Debug/emergency-stop",
   "reoptimization-interval-hours": 168,
+  "emergency-stop-poll-seconds": 1,
+  "paper-shutdown-timeout-seconds": 30,
   "minimum-validation-trades-per-window": 10,
   "maximum-validation-drawdown": 0.08,
   "minimum-robustness-adjusted-fitness": 0.0

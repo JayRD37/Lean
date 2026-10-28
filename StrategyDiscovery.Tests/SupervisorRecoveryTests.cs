@@ -396,6 +396,7 @@ public class SupervisorRecoveryTests
         File.WriteAllText(overlayPath, new JObject
         {
             ["alpaca-paper-trading"] = true,
+            ["fixture-ignore-kill-switch"] = true,
             ["parameters"] = new JObject
             {
                 ["discovery.max-positions"] = "3",
@@ -424,6 +425,8 @@ public class SupervisorRecoveryTests
             OutputDirectory = outputDirectory,
             KillSwitchFile = Path.Combine(folder, "emergency-stop"),
             ReoptimizationIntervalHours = 1,
+            EmergencyStopPollSeconds = 1,
+            PaperShutdownTimeoutSeconds = 1,
             MaximumConsecutivePaperFailures = 3,
             MinimumHealthyPaperRunMinutes = 5,
             RestartBackoffSeconds = 1
@@ -471,7 +474,8 @@ public class SupervisorRecoveryTests
             var events = File.ReadAllLines(statePath);
             Assert.That(events.Count(line => line.StartsWith("optimizer|", StringComparison.Ordinal)), Is.EqualTo(1));
             Assert.That(events.Count(line => line.StartsWith("paper|", StringComparison.Ordinal)), Is.EqualTo(2));
-            Assert.That(File.ReadAllText(audit), Does.Contain("external_emergency_stop_honored"));
+            Assert.That(File.ReadAllText(audit), Does.Contain("external_emergency_stop_detected"));
+            Assert.That(File.ReadAllText(audit), Does.Contain("paper_shutdown_timeout_force_terminated"));
         }
         finally
         {

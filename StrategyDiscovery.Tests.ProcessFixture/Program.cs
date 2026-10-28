@@ -72,9 +72,10 @@ if (args.Length == 2 && args[0] == "--config")
 
         var killSwitch = config["parameters"]?["discovery.kill-switch-file"]?.GetValue<string>()
             ?? throw new InvalidDataException("Paper kill switch is missing.");
+        var ignoreKillSwitch = config["fixture-ignore-kill-switch"]?.GetValue<bool>() ?? false;
         Console.WriteLine("PAPER_READY");
         Console.Out.Flush();
-        while (!File.Exists(killSwitch)) await Task.Delay(20);
+        while (ignoreKillSwitch || !File.Exists(killSwitch)) await Task.Delay(20);
         return 0;
     }
 

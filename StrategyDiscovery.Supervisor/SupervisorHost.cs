@@ -50,7 +50,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     throw new InvalidOperationException($"Emergency stop is already present at '{settings.KillSwitchFile}'. Clear it only after investigating the stop request.");
 
                 await AuditAsync("adopted_paper_process_stopping_for_existing_emergency_stop", new { processId = active.Process.Id }).ConfigureAwait(false);
-                await active.Process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                await WaitForPaperShutdownAsync(active, "existing emergency stop").ConfigureAwait(false);
                 await active.DisposeAsync().ConfigureAwait(false);
                 active = null;
                 return;
@@ -66,10 +66,40 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     continue;
                 }
 
-                var delay = Task.Delay(TimeSpan.FromHours(settings.ReoptimizationIntervalHours), cancellationToken);
                 var exited = active.Process.WaitForExitAsync();
-                var completed = await Task.WhenAny(delay, exited).ConfigureAwait(false);
-                if (completed == exited)
+                var nextOptimizationAt = DateTime.UtcNow.AddHours(settings.ReoptimizationIntervalHours);
+                var externalStopDetected = false;
+                var processExited = false;
+                while (DateTime.UtcNow < nextOptimizationAt)
+                {
+                    var remaining = nextOptimizationAt - DateTime.UtcNow;
+                    var pollInterval = TimeSpan.FromSeconds(settings.EmergencyStopPollSeconds);
+                    var pollDelay = Task.Delay(remaining < pollInterval ? remaining : pollInterval, cancellationToken);
+                    var completed = await Task.WhenAny(pollDelay, exited).ConfigureAwait(false);
+                    if (completed == exited)
+                    {
+                        processExited = true;
+                        break;
+                    }
+
+                    await pollDelay.ConfigureAwait(false);
+                    if (File.Exists(settings.KillSwitchFile))
+                    {
+                        externalStopDetected = true;
+                        break;
+                    }
+                }
+
+                if (externalStopDetected)
+                {
+                    await AuditAsync("external_emergency_stop_detected", new { }).ConfigureAwait(false);
+                    await WaitForPaperShutdownAsync(active, "external emergency stop").ConfigureAwait(false);
+                    await active.DisposeAsync().ConfigureAwait(false);
+                    active = null;
+                    return;
+                }
+
+                if (processExited)
                 {
                     await exited.ConfigureAwait(false);
                     var exitCode = active.Process.ExitCode;
@@ -100,11 +130,10 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     continue;
                 }
 
-                await delay.ConfigureAwait(false);
                 if (File.Exists(settings.KillSwitchFile))
                 {
                     await AuditAsync("external_emergency_stop_detected", new { }).ConfigureAwait(false);
-                    await active.Process.WaitForExitAsync().ConfigureAwait(false);
+                    await WaitForPaperShutdownAsync(active, "external emergency stop").ConfigureAwait(false);
                     await active.DisposeAsync().ConfigureAwait(false);
                     active = null;
                     return;
@@ -153,16 +182,17 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 if (!TryCreateKillSwitch("scheduled strategy promotion"))
                 {
                     await AuditAsync("emergency_stop_raced_with_promotion", new { }).ConfigureAwait(false);
-                    await active.Process.WaitForExitAsync().ConfigureAwait(false);
+                    await WaitForPaperShutdownAsync(active, "emergency stop raced with promotion").ConfigureAwait(false);
                     await active.DisposeAsync().ConfigureAwait(false);
                     active = null;
                     return;
                 }
 
                 await AuditAsync("graceful_paper_strategy_shutdown_requested", new { oldGenome = activeStrategy?.Genome, newGenome = nextStrategy.Genome }).ConfigureAwait(false);
-                await active.Process.WaitForExitAsync().ConfigureAwait(false);
+                var stoppedCleanly = await WaitForPaperShutdownAsync(active, "scheduled strategy promotion").ConfigureAwait(false);
                 await active.DisposeAsync().ConfigureAwait(false);
                 active = null;
+                if (!stoppedCleanly) return;
                 if (cancellationToken.IsCancellationRequested) return;
                 DeleteOwnedKillSwitch();
                 activeStrategy = nextStrategy;
@@ -178,9 +208,39 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     TryCreateKillSwitch("supervisor shutdown");
                     await AuditAsync("graceful_paper_shutdown_requested", new { genome = activeStrategy?.Genome }).ConfigureAwait(false);
                 }
-                if (!active.Process.HasExited) await active.Process.WaitForExitAsync().ConfigureAwait(false);
+                if (!active.Process.HasExited) await WaitForPaperShutdownAsync(active, "supervisor shutdown").ConfigureAwait(false);
                 await active.DisposeAsync().ConfigureAwait(false);
             }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private async Task<bool> WaitForPaperShutdownAsync(PaperSession session, string reason)
+    {
+        if (session.Process.HasExited) return true;
+        try
+        {
+            await session.Process.WaitForExitAsync()
+                .WaitAsync(TimeSpan.FromSeconds(settings.PaperShutdownTimeoutSeconds))
+                .ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            await AuditAsync("paper_shutdown_timeout_force_terminated", new
+            {
+                processId = session.Process.Id,
+                timeoutSeconds = settings.PaperShutdownTimeoutSeconds,
+                reason
+            }).ConfigureAwait(false);
+            try
+            {
+                if (!session.Process.HasExited) session.Process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) { }
+            await session.Process.WaitForExitAsync().ConfigureAwait(false);
+            return false;
         }
     }
 

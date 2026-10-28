@@ -23,6 +23,8 @@ public sealed class SupervisorSettings
     [JsonProperty("maximum-consecutive-paper-failures")] public int MaximumConsecutivePaperFailures { get; set; } = 3;
     [JsonProperty("minimum-healthy-paper-run-minutes")] public int MinimumHealthyPaperRunMinutes { get; set; } = 5;
     [JsonProperty("restart-backoff-seconds")] public int RestartBackoffSeconds { get; set; } = 30;
+    [JsonProperty("emergency-stop-poll-seconds")] public int EmergencyStopPollSeconds { get; set; } = 1;
+    [JsonProperty("paper-shutdown-timeout-seconds")] public int PaperShutdownTimeoutSeconds { get; set; } = 30;
     [JsonIgnore] public int MaximumPaperPositions { get; private set; } = 3;
     [JsonIgnore] public int MaximumPaperExposurePercent { get; private set; } = 30;
     [JsonIgnore] public int RequiredValidationWindowCount { get; private set; } = 1;
@@ -68,8 +70,9 @@ public sealed class SupervisorSettings
         }
         if (ReoptimizationIntervalHours < 1) throw new InvalidDataException("reoptimization-interval-hours must be positive.");
         if (MinimumValidationTradesPerWindow < 0) throw new InvalidDataException("minimum-validation-trades-per-window cannot be negative.");
-        if (MaximumConsecutivePaperFailures < 1 || MinimumHealthyPaperRunMinutes < 1 || RestartBackoffSeconds < 1)
-            throw new InvalidDataException("Paper restart limits and backoff must be positive.");
+        if (MaximumConsecutivePaperFailures < 1 || MinimumHealthyPaperRunMinutes < 1 || RestartBackoffSeconds < 1 ||
+            EmergencyStopPollSeconds < 1 || PaperShutdownTimeoutSeconds < 1)
+            throw new InvalidDataException("Paper failure limits, poll interval, shutdown timeout, and restart backoff must be positive.");
         if (!double.IsFinite(MaximumValidationDrawdown) || MaximumValidationDrawdown is <= 0 or >= 1)
             throw new InvalidDataException("maximum-validation-drawdown must be between zero and one.");
         if (!double.IsFinite(MinimumRobustnessAdjustedFitness)) throw new InvalidDataException("minimum-robustness-adjusted-fitness must be finite.");
