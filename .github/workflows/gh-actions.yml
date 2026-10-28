@@ -43,10 +43,6 @@ jobs:
           # Run Tests
           dotnet test ./Tests/bin/Release/QuantConnect.Tests.dll --blame-hang-timeout 300seconds --blame-crash --filter "TestCategory!=TravisExclude&TestCategory!=ResearchRegressionTests" -- TestRunParameters.Parameter\(name=\"log-handler\", value=\"ConsoleErrorLogHandler\"\)
 
-          # Run the genetic discovery and paper supervisor tests explicitly; they are a
-          # separate focused project and are not included in the main LEAN test assembly.
-          dotnet test ./StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --no-build
-
           # Generate & Publish python stubs
           echo "GITHUB_REF ${{ github.ref }}"
           case "${{ github.ref }}" in

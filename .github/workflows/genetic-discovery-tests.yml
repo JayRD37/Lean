@@ -1,0 +1,54 @@
+name: Genetic Discovery Tests
+
+on:
+  push:
+    branches: ['*']
+    paths:
+      - 'Algorithm/**'
+      - 'Algorithm.CSharp/**'
+      - 'Common/**'
+      - 'Optimizer/**'
+      - 'StrategyDiscovery/**'
+      - 'StrategyDiscovery.Supervisor/**'
+      - 'StrategyDiscovery.Tests/**'
+      - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
+      - 'Tests/StrategyDiscovery/**'
+      - 'global.json'
+      - '.github/workflows/genetic-discovery-tests.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Algorithm/**'
+      - 'Algorithm.CSharp/**'
+      - 'Common/**'
+      - 'Optimizer/**'
+      - 'StrategyDiscovery/**'
+      - 'StrategyDiscovery.Supervisor/**'
+      - 'StrategyDiscovery.Tests/**'
+      - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
+      - 'Tests/StrategyDiscovery/**'
+      - 'global.json'
+      - '.github/workflows/genetic-discovery-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genetic-discovery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.403
+
+      - name: Run genetic discovery and supervisor tests
+        run: dotnet test StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --verbosity minimal
