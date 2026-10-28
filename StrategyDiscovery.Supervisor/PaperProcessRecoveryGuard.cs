@@ -8,6 +8,8 @@ public sealed record PaperProcessIdentity(int ProcessId, DateTimeOffset StartedA
 /// <summary>Detects orphaned LEAN paper children so a restarted supervisor cannot create a duplicate session.</summary>
 public static class PaperProcessRecoveryGuard
 {
+    private static readonly TimeSpan ProcessStartTimeTolerance = TimeSpan.FromSeconds(2);
+
     public static PaperProcessIdentity? FindOrphan(string statePath, Func<int, DateTimeOffset?> getProcessStartTimeUtc)
     {
         ArgumentNullException.ThrowIfNull(getProcessStartTimeUtc);
@@ -26,7 +28,7 @@ public static class PaperProcessRecoveryGuard
 
         if (identity.ProcessId < 1) throw new InvalidDataException("Active paper session state contains an invalid process ID.");
         var actualStartTime = getProcessStartTimeUtc(identity.ProcessId);
-        if (actualStartTime is null || actualStartTime.Value != identity.StartedAtUtc)
+        if (actualStartTime is null || (actualStartTime.Value - identity.StartedAtUtc).Duration() > ProcessStartTimeTolerance)
         {
             File.Delete(statePath);
             return null;

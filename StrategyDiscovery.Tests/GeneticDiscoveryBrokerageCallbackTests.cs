@@ -4,9 +4,15 @@ using QuantConnect.Algorithm.CSharp;
 using QuantConnect.Brokerages;
 using QuantConnect.Brokerages.Backtesting;
 using QuantConnect.Configuration;
+using QuantConnect.Data;
+using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine;
+using QuantConnect.Lean.Engine.Results;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
+using QuantConnect.Securities;
 
 namespace QuantConnect.Genetic.Tests;
 
@@ -60,6 +66,55 @@ public sealed class GeneticDiscoveryBrokerageCallbackTests
     }
 
     [Test]
+    public void BrokerageTransactionHandlerForwardsRejectedOrderToStrategySafetyGate()
+    {
+        var algorithm = new GeneticDiscoveryAlgorithm();
+        var marketHoursDatabase = MarketHoursDatabase.FromDataFolder();
+        algorithm.Securities.SetSecurityService(new SecurityService(
+            algorithm.Portfolio.CashBook,
+            marketHoursDatabase,
+            SymbolPropertiesDatabase.FromDataFolder(),
+            algorithm,
+            RegisteredSecurityDataTypesProvider.Null,
+            new SecurityCacheProvider(algorithm.Portfolio),
+            algorithm: algorithm));
+        algorithm.SetLiveMode(true);
+        var symbol = new Symbol(SecurityIdentifier.GenerateEquity("SPY", Market.USA, mapSymbol: false), "SPY");
+        var timeZone = TimeZones.NewYork;
+        var config = new SubscriptionDataConfig(typeof(TradeBar), symbol, Resolution.Minute, timeZone, timeZone, true, true, false);
+        var security = new Security(
+            SecurityExchangeHours.AlwaysOpen(timeZone),
+            config,
+            new Cash(Currencies.USD, 0m, 1m),
+            SymbolProperties.GetDefault(Currencies.USD),
+            ErrorCurrencyConverter.Instance,
+            RegisteredSecurityDataTypesProvider.Null,
+            new SecurityCache());
+        algorithm.Securities.Add(symbol, security);
+
+        using var brokerage = new TestBacktestingBrokerage(algorithm);
+        var transactionHandler = new BrokerageTransactionHandler();
+        transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+        try
+        {
+            var order = new MarketOrder(symbol, 1, DateTime.UtcNow);
+            transactionHandler.AddOpenOrder(order, algorithm);
+            brokerage.EmitOrderEvent(new OrderEvent(order, algorithm.UtcTime, OrderFee.Zero)
+            {
+                Status = OrderStatus.Invalid,
+                Message = "Injected brokerage rejection"
+            });
+
+            Assert.That(algorithm.ExecutionSafetyTripped, Is.True);
+            Assert.That(algorithm.CanSubmitStrategyOrders, Is.False);
+        }
+        finally
+        {
+            transactionHandler.Exit();
+        }
+    }
+
+    [Test]
     public void InvalidOrderCallbackLatchesShutdownAcrossBrokerageReconnect()
     {
         var algorithm = new GeneticDiscoveryAlgorithm();
@@ -85,6 +140,8 @@ public sealed class GeneticDiscoveryBrokerageCallbackTests
     private sealed class TestBacktestingBrokerage(IAlgorithm algorithm) : BacktestingBrokerage(algorithm)
     {
         public void Emit(BrokerageMessageEvent message) => OnMessage(message);
+
+        public void EmitOrderEvent(OrderEvent orderEvent) => OnOrderEvent(orderEvent);
     }
 
     private sealed class RecordingBrokerageMessageHandler : IBrokerageMessageHandler

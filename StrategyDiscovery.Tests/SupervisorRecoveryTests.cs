@@ -25,7 +25,11 @@ public class SupervisorRecoveryTests
             Assert.That(File.Exists(statePath), Is.False);
 
             PaperProcessRecoveryGuard.Save(statePath, identity);
-            Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => identity.StartedAtUtc.AddSeconds(1)), Is.Null);
+            Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => identity.StartedAtUtc.AddSeconds(1)), Is.EqualTo(identity));
+            Assert.That(File.Exists(statePath), Is.True, "Small OS-reported process start-time differences must keep a live session marker.");
+
+            PaperProcessRecoveryGuard.Save(statePath, identity);
+            Assert.That(PaperProcessRecoveryGuard.FindOrphan(statePath, _ => identity.StartedAtUtc.AddSeconds(3)), Is.Null);
             Assert.That(File.Exists(statePath), Is.False);
         }
         finally { Directory.Delete(folder, recursive: true); }
