@@ -117,6 +117,8 @@ public class PromotionSelectorTests
             Assert.That(config["parameters"]?["discovery.family"]?.Value<string>(), Is.EqualTo("MeanReversion"));
             Assert.That(config["parameters"]?["discovery.timeframe"]?.Value<string>(), Is.EqualTo("Hour"));
             Assert.That(config["parameters"]?["discovery.fast-period"]?.Value<string>(), Is.EqualTo("9"));
+            Assert.That(config["parameters"]?["discovery.drawdown-state-file"]?.Value<string>(),
+                Is.EqualTo(Path.Combine(directory, "portfolio-drawdown-state.json")));
         }
         finally
         {

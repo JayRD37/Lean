@@ -51,6 +51,7 @@ public static class PaperConfigFactory
         parameters["discovery.max-positions"] = strategy.Genome.MaxPositions.ToString(System.Globalization.CultureInfo.InvariantCulture);
         parameters["discovery.max-exposure-percent"] = strategy.Genome.MaxExposurePercent.ToString(System.Globalization.CultureInfo.InvariantCulture);
         parameters["discovery.kill-switch-file"] = Path.GetFullPath(killSwitchPath);
+        parameters["discovery.drawdown-state-file"] = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(killSwitchPath))!, "portfolio-drawdown-state.json");
 
         if (config["alpaca-paper-trading"]?.Value<bool>() != true || parameters["discovery.allow-paper-trading"]?.Value<string>() != "true")
             throw new InvalidDataException("Paper-trading guards were not enabled in the generated configuration.");

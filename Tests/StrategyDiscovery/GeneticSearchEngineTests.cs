@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Genetic;
@@ -194,6 +195,51 @@ public class GeneticSearchEngineTests
         Assert.That(gate.CanLiquidate, Is.True);
         Assert.That(gate.MustLiquidate, Is.True);
         Assert.Throws<ArgumentException>(() => gate.Trip(" "));
+    }
+
+    [Test]
+    public void PortfolioDrawdownGuardRestoresHighWatermarkAndKeepsTripLatchedAcrossRestart()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "lean-drawdown-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var statePath = Path.Combine(folder, "portfolio-drawdown-state.json");
+            var firstProcess = new PortfolioDrawdownGuard(0.10m, 100m, statePath);
+            Assert.That(firstProcess.Update(120m), Is.False);
+            Assert.That(firstProcess.HighWatermark, Is.EqualTo(120m));
+
+            var restartedProcess = new PortfolioDrawdownGuard(0.10m, 107m, statePath);
+            Assert.That(restartedProcess.HighWatermark, Is.EqualTo(120m));
+            Assert.That(restartedProcess.IsTripped, Is.True);
+            Assert.That(restartedProcess.Update(130m), Is.True);
+
+            var secondRestart = new PortfolioDrawdownGuard(0.10m, 130m, statePath);
+            Assert.That(secondRestart.IsTripped, Is.True);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Test]
+    public void PortfolioDrawdownGuardFailsClosedOnCorruptStateAndZeroEquity()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "lean-drawdown-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var statePath = Path.Combine(folder, "portfolio-drawdown-state.json");
+            File.WriteAllText(statePath, "{broken");
+            Assert.Throws<InvalidDataException>(() => new PortfolioDrawdownGuard(0.10m, 100m, statePath));
+
+            File.WriteAllText(statePath, "{\"Version\":9,\"HighWatermark\":100,\"Tripped\":false}");
+            Assert.Throws<InvalidDataException>(() => PortfolioDrawdownGuard.LoadState(statePath));
+
+            File.Delete(statePath);
+            var guard = new PortfolioDrawdownGuard(0.10m, 100m, statePath);
+            Assert.That(guard.Update(0m), Is.True);
+            Assert.That(PortfolioDrawdownGuard.LoadState(statePath)?.Tripped, Is.True);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
     }
 
     [Test]

@@ -4,7 +4,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using QuantConnect.Algorithm.Framework.Portfolio;
-using QuantConnect.Algorithm.Framework.Risk;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
@@ -39,7 +38,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private double _exitThreshold;
     private string _killSwitchFile;
     private bool _shutdownRequested;
-    private decimal _portfolioHighWatermark;
+    private PortfolioDrawdownGuard _drawdownGuard = null!;
     private StrategyLifecycleMonitor _lifecycleMonitor;
     private StrategyLifecycleOptions _lifecycleOptions;
 
@@ -70,8 +69,6 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
         SetBrokerageModel(BrokerageName.Alpaca, AccountType.Margin);
         AddSecurityInitializer(security => security.SetSlippageModel(new SpreadAndVolumeShareSlippageModel(_minimumSpreadBasisPoints)));
-        AddRiskManagement(new MaximumDrawdownPercentPortfolio((decimal)_maximumPortfolioDrawdown, isTrailing: true));
-
         if (!LiveMode)
         {
             var phase = GetParameter("discovery.phase", "Training");
@@ -100,7 +97,10 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
 
         SetWarmUp(_slowPeriod + CorrelationWindow, _resolution);
-        _portfolioHighWatermark = Portfolio.TotalPortfolioValue;
+        _drawdownGuard = new PortfolioDrawdownGuard(
+            (decimal)_maximumPortfolioDrawdown,
+            Portfolio.TotalPortfolioValue,
+            GetParameter("discovery.drawdown-state-file", string.Empty));
         _lifecycleOptions = new StrategyLifecycleOptions
         {
             ReevaluationIntervalDays = GetParameter("discovery.reevaluation-interval-days", 30),
@@ -271,9 +271,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             return true;
         }
 
-        var equity = Portfolio.TotalPortfolioValue;
-        if (_portfolioHighWatermark <= 0 || equity > _portfolioHighWatermark) _portfolioHighWatermark = equity;
-        return _portfolioHighWatermark > 0 && equity / _portfolioHighWatermark - 1m <= -(decimal)_maximumPortfolioDrawdown;
+        return _drawdownGuard.Update(Portfolio.TotalPortfolioValue);
     }
 
     private static double Correlation(SymbolState first, SymbolState second)

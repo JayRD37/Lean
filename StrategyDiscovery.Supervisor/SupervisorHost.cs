@@ -168,6 +168,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
 
     private async Task<PromotedStrategy> OptimizeAndSelectAsync(CancellationToken cancellationToken)
     {
+        EnsurePortfolioDrawdownNotTripped();
         var rankingsPath = settings.RankingsFile;
         var previousWriteTime = File.Exists(rankingsPath) ? File.GetLastWriteTimeUtc(rankingsPath) : DateTime.MinValue;
         var started = DateTime.UtcNow;
@@ -189,6 +190,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
 
     private PaperSession StartPaper(PromotedStrategy strategy, string apiKey, string apiSecret)
     {
+        EnsurePortfolioDrawdownNotTripped();
         if (File.Exists(settings.KillSwitchFile)) throw new InvalidOperationException("Cannot start a paper process while the emergency stop file exists.");
         var optimizer = JObjectConfig.Read(settings.OptimizerConfig);
         var algorithmType = optimizer["algorithm-type-name"]?.Value<string>()
@@ -231,6 +233,14 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             PaperConfigFactory.DeleteEphemeralConfig(configPath);
             throw;
         }
+    }
+
+    private void EnsurePortfolioDrawdownNotTripped()
+    {
+        var statePath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.KillSwitchFile))!, "portfolio-drawdown-state.json");
+        var state = PortfolioDrawdownGuard.LoadState(statePath);
+        if (state?.Tripped == true)
+            throw new InvalidOperationException("The persistent account drawdown limit has tripped. Automatic optimization and paper restarts are disabled until an operator reviews the account and risk-state file.");
     }
 
     private async Task<int> RunChildAsync(string launcherDll, string workingDirectory, string configPath, string logPath, CancellationToken cancellationToken)
