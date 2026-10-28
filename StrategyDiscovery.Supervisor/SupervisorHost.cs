@@ -142,7 +142,29 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 PromotedStrategy nextStrategy;
                 try
                 {
-                    nextStrategy = await OptimizeAndSelectAsync(cancellationToken).ConfigureAwait(false);
+                    using var optimizationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    var optimization = OptimizeAndSelectAsync(optimizationCancellation.Token);
+                    var emergencyStop = WaitForEmergencyStopAsync(optimizationCancellation.Token);
+                    var completed = await Task.WhenAny(optimization, emergencyStop).ConfigureAwait(false);
+                    if (completed == emergencyStop && await emergencyStop.ConfigureAwait(false))
+                    {
+                        optimizationCancellation.Cancel();
+                        try { await optimization.ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (Exception exception)
+                        {
+                            await AuditAsync("optimization_aborted_for_emergency_stop", new { exception = exception.Message }).ConfigureAwait(false);
+                        }
+                        await AuditAsync("external_emergency_stop_during_optimization_honored", new { }).ConfigureAwait(false);
+                        await WaitForPaperShutdownAsync(active, "external emergency stop during optimization").ConfigureAwait(false);
+                        await active.DisposeAsync().ConfigureAwait(false);
+                        active = null;
+                        return;
+                    }
+
+                    optimizationCancellation.Cancel();
+                    nextStrategy = await optimization.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -242,6 +264,20 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             await session.Process.WaitForExitAsync().ConfigureAwait(false);
             return false;
         }
+    }
+
+    private async Task<bool> WaitForEmergencyStopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (File.Exists(settings.KillSwitchFile)) return true;
+                await Task.Delay(TimeSpan.FromSeconds(settings.EmergencyStopPollSeconds), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        return false;
     }
 
     private async Task<PromotedStrategy> OptimizeAndSelectAsync(CancellationToken cancellationToken)
