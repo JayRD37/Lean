@@ -99,6 +99,47 @@ function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [s
     return [pscustomobject]@{ Result = $result; ResultPath = $resultPath; LogPath = $logPath; AlgorithmLogPath = $algorithmLogPath; DrawdownPath = $drawdownPath }
 }
 
+function Run-RawSplitCheck {
+    $runRoot = Join-Path $OutputRoot 'raw-split-check'
+    New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+    $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
+    $config['environment'] = 'backtesting'
+    $config['algorithm-type-name'] = 'GeneticDiscoveryCorporateActionAlgorithm'
+    $config['algorithm-location'] = $algorithm
+    $config['data-folder'] = $dataDir
+    $config['results-destination-folder'] = $runRoot
+    $config['parameters'] = @{}
+
+    $configPath = Join-Path $runRoot 'config.json'
+    [IO.File]::WriteAllText($configPath, (ConvertTo-Json -InputObject $config -Depth 100))
+    $logPath = Join-Path $runRoot 'launcher.log'
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $dotnet
+    $start.WorkingDirectory = $launcherDir
+    $start.ArgumentList.Add($launcher)
+    $start.ArgumentList.Add('--config')
+    $start.ArgumentList.Add($configPath)
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.UseShellExecute = $false
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) { throw 'Could not start LEAN for raw-mode split check.' }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $log = $stdoutTask.Result + [Environment]::NewLine + $stderrTask.Result
+    [IO.File]::WriteAllText($logPath, $log)
+    if ($process.ExitCode -ne 0) { throw "Raw-mode split check failed. See $logPath" }
+
+    $algorithmLogPath = Join-Path $runRoot 'GeneticDiscoveryCorporateActionAlgorithm-log.txt'
+    if (-not (Test-Path -LiteralPath $algorithmLogPath)) { throw "Raw-mode split check log not found: $algorithmLogPath" }
+    $actionsLog = Get-Content -LiteralPath $algorithmLogPath -Raw
+    if ($actionsLog -notmatch 'split AAPL factor=0\.25 holdingQuantity=4') { throw "Raw-mode split did not adjust one AAPL share to four; inspect $algorithmLogPath" }
+    if ($actionsLog -notmatch 'dividend AAPL distribution=') { throw "Raw-mode dividend event was not delivered; inspect $algorithmLogPath" }
+    return $algorithmLogPath
+}
+
 function Get-NormalizedOrders($Result, [datetime] $Through) {
     @($Result.orders.PSObject.Properties | ForEach-Object { $_.Value } |
         Where-Object {
@@ -119,6 +160,7 @@ $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
+Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
 
@@ -138,8 +180,10 @@ $splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate 
 if ($splitLine -notmatch 'holdingQuantity=(-?[0-9.]+)' -or [decimal]$Matches[1] -eq 0) { throw "AAPL had no open position during the split event; inspect $($corporateActions.AlgorithmLogPath)" }
 if ($actionsLog -notmatch 'Corporate action: dividend symbol=AAPL distribution=') { throw "LEAN did not deliver an AAPL dividend event; inspect $($corporateActions.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN delivered AAPL split and dividend events through the adjusted-data strategy run."
+Write-Output "PASS: LEAN adjusted one AAPL share to four and delivered a dividend under raw normalization."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
 Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"
+
 
