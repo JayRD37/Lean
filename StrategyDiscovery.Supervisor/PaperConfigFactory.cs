@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Genetic;
@@ -76,8 +78,14 @@ public static class PaperConfigFactory
         var path = Path.Combine(directory, "config.json");
         try
         {
-            if (!OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows())
+            {
+                RestrictDirectoryToCurrentUser(directory);
+            }
+            else
+            {
                 File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
             File.WriteAllText(path, config.ToString(Formatting.Indented));
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
@@ -88,6 +96,21 @@ public static class PaperConfigFactory
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
             throw;
         }
+    }
+
+    private static void RestrictDirectoryToCurrentUser(string directory)
+    {
+        var userSid = WindowsIdentity.GetCurrent().User
+            ?? throw new UnauthorizedAccessException("Could not determine the current Windows user for the paper-config ACL.");
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            userSid,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        new DirectoryInfo(directory).SetAccessControl(security);
     }
 
     public static void DeleteEphemeralConfig(string path)
