@@ -3,29 +3,61 @@ namespace QuantConnect.Genetic;
 /// <summary>Controls whether a strategy may submit new orders after brokerage incidents.</summary>
 public sealed class BrokerageSafetyGate
 {
-    public bool IsConnected { get; private set; } = true;
+    private readonly object _sync = new();
+    private bool _isConnected = true;
+    private bool _isTripped;
+    private string? _tripReason;
 
-    public bool IsTripped { get; private set; }
+    public bool IsConnected
+    {
+        get { lock (_sync) return _isConnected; }
+    }
 
-    public string? TripReason { get; private set; }
+    public bool IsTripped
+    {
+        get { lock (_sync) return _isTripped; }
+    }
 
-    public bool CanSubmitOrders => IsConnected && !IsTripped;
+    public string? TripReason
+    {
+        get { lock (_sync) return _tripReason; }
+    }
 
-    public bool CanLiquidate => IsConnected;
+    public bool CanSubmitOrders
+    {
+        get { lock (_sync) return _isConnected && !_isTripped; }
+    }
 
-    public bool MustLiquidate => IsTripped;
+    public bool CanLiquidate
+    {
+        get { lock (_sync) return _isConnected; }
+    }
 
-    public void Disconnect() => IsConnected = false;
+    public bool MustLiquidate
+    {
+        get { lock (_sync) return _isTripped; }
+    }
+
+    public void Disconnect()
+    {
+        lock (_sync) _isConnected = false;
+    }
 
     public void Reconnect()
     {
-        if (!IsTripped) IsConnected = true;
+        lock (_sync)
+        {
+            if (!_isTripped) _isConnected = true;
+        }
     }
 
     public void Trip(string reason)
     {
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("A trip reason is required.", nameof(reason));
-        IsTripped = true;
-        TripReason ??= reason;
+        lock (_sync)
+        {
+            _tripReason ??= reason;
+            _isTripped = true;
+        }
     }
 }

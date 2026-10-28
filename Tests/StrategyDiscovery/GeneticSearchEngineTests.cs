@@ -217,6 +217,34 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void ConcurrentBrokerageEventsKeepRejectionLatchedAndItsReasonAvailable()
+    {
+        var gate = new BrokerageSafetyGate();
+
+        Parallel.For(0, 256, index =>
+        {
+            switch (index % 3)
+            {
+                case 0:
+                    gate.Disconnect();
+                    break;
+                case 1:
+                    gate.Reconnect();
+                    break;
+                default:
+                    gate.Trip($"order rejected {index}");
+                    break;
+            }
+        });
+
+        Assert.That(gate.IsTripped, Is.True);
+        Assert.That(gate.MustLiquidate, Is.True);
+        Assert.That(gate.CanSubmitOrders, Is.False);
+        Assert.That(gate.TripReason, Does.StartWith("order rejected "));
+        Assert.That(gate.CanLiquidate, Is.EqualTo(gate.IsConnected));
+    }
+
+    [Test]
     public void LiveExecutionRequiresExplicitAlpacaPaperAuthorization()
     {
         Assert.DoesNotThrow(() => PaperExecutionAuthorization.Validate(false, false, false, "InteractiveBrokersBrokerage"));
