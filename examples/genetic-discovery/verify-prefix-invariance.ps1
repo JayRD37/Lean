@@ -161,10 +161,13 @@ $through = [datetime]'2021-02-10'
 $short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
 $long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
 $corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
-$multiTimeframe = Run-Backtest 'multi-timeframe' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
+$multiShort = Run-Backtest 'multi-prefix' '2020-01-02' '2021-02-15' 'SPY' 'Hour' 'Daily'
+$multiLong = Run-Backtest 'multi-full-history' '2020-01-02' '2021-03-31' 'SPY' 'Hour' 'Daily'
 Run-RawSplitCheck | Out-Null
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
+$multiShortOrders = @(Get-NormalizedOrders $multiShort.Result $through)
+$multiLongOrders = @(Get-NormalizedOrders $multiLong.Result $through)
 
 if ($shortOrders.Count -eq 0) { throw "Prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($short.LogPath)" }
 $shortJson = ConvertTo-Json -InputObject $shortOrders -Depth 5 -Compress
@@ -176,21 +179,27 @@ if ($shortJson -cne $longJson) {
 }
 
 Write-Output "PASS: $($shortOrders.Count) filled orders are identical through $($through.ToString('yyyy-MM-dd'))."
+$multiShortJson = ConvertTo-Json -InputObject $multiShortOrders -Depth 5 -Compress
+$multiLongJson = ConvertTo-Json -InputObject $multiLongOrders -Depth 5 -Compress
+if ($multiShortOrders.Count -eq 0) { throw "Multi-timeframe prefix run produced no filled orders through $($through.ToString('yyyy-MM-dd')). Inspect $($multiShort.LogPath)" }
+if ($multiShortJson -cne $multiLongJson) { throw "Multi-timeframe prefix/full-history orders differ through $($through.ToString('yyyy-MM-dd')); inspect the run artifacts under $OutputRoot" }
+Write-Output "PASS: $($multiShortOrders.Count) hourly/daily-confirmation fills are identical through $($through.ToString('yyyy-MM-dd'))."
 $actionsLog = Get-Content -LiteralPath $corporateActions.AlgorithmLogPath -Raw
 if ($actionsLog -notmatch 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25') { throw "LEAN did not deliver AAPL's 2020 four-for-one split event; inspect $($corporateActions.AlgorithmLogPath)" }
 $splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25' } | Select-Object -Last 1
 if ($splitLine -notmatch 'holdingQuantity=(-?[0-9.]+)' -or [decimal]$Matches[1] -eq 0) { throw "AAPL had no open position during the split event; inspect $($corporateActions.AlgorithmLogPath)" }
 if ($actionsLog -notmatch 'Corporate action: dividend symbol=AAPL distribution=') { throw "LEAN did not deliver an AAPL dividend event; inspect $($corporateActions.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN delivered AAPL split and dividend events through the adjusted-data strategy run."
-$multiTimeframeLog = Get-Content -LiteralPath $multiTimeframe.AlgorithmLogPath -Raw
-if ($multiTimeframeLog -notmatch 'Multi-timeframe confirmation ready: symbol=SPY primary=Hour confirmation=Daily') { throw "Daily confirmation indicators never became ready on the hourly SPY subscription; inspect $($multiTimeframe.AlgorithmLogPath)" }
-if ($multiTimeframeLog -match 'Execution safety gate tripped') { throw "Multi-timeframe backtest hit an invalid order; inspect $($multiTimeframe.AlgorithmLogPath)" }
+$multiTimeframeLog = Get-Content -LiteralPath $multiLong.AlgorithmLogPath -Raw
+if ($multiTimeframeLog -notmatch 'Multi-timeframe confirmation ready: symbol=SPY primary=Hour confirmation=Daily') { throw "Daily confirmation indicators never became ready on the hourly SPY subscription; inspect $($multiLong.AlgorithmLogPath)" }
+if ($multiTimeframeLog -match 'Execution safety gate tripped') { throw "Multi-timeframe backtest hit an invalid order; inspect $($multiLong.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN aggregated daily confirmation indicators over hourly SPY data and reached readiness."
 Write-Output "PASS: LEAN adjusted one AAPL share to four and credited a dividend under raw normalization."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
 Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"
+
 
 
 
