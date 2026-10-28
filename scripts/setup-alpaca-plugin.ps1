@@ -16,6 +16,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "lean-alpaca-plugin-$pluginComm
 $sourceDirectory = Join-Path (Split-Path $repositoryRoot -Parent) "Lean.Brokerages.Alpaca-$pluginCommit"
 $publishDirectory = Join-Path $tempRoot ("publish-" + [Guid]::NewGuid().ToString("N"))
 $projectPath = Join-Path $sourceDirectory "QuantConnect.AlpacaBrokerage/QuantConnect.AlpacaBrokerage.csproj"
+$alpacaSdkLicenseCommit = "5a5a328650abab87384ecd8bd22209d6827cc26d"
 
 $sdks = & dotnet --list-sdks
 if ($LASTEXITCODE -ne 0 -or -not ($sdks | Where-Object { $_ -match '^10\.' })) {
@@ -58,6 +59,21 @@ foreach ($requiredFile in $requiredFiles) {
     }
 }
 
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "LICENSE") -Destination (Join-Path $publishDirectory "QUANTCONNECT-LEAN-LICENSE.txt") -Force
+$sdkLicenseUrl = "https://raw.githubusercontent.com/QuantConnect/alpaca-trade-api-csharp/$alpacaSdkLicenseCommit/LICENSE"
+$sdkLicensePath = Join-Path $publishDirectory "ALPACA-SDK-LICENSE.txt"
+Invoke-WebRequest -Uri $sdkLicenseUrl -OutFile $sdkLicensePath
+if (-not ([IO.File]::ReadAllText($sdkLicensePath).Contains("Apache License"))) {
+    throw "The pinned Alpaca SDK license response was not an Apache license; refusing to stage third-party binaries."
+}
+$thirdPartyNoticesPath = Join-Path $publishDirectory "THIRD-PARTY-NOTICES.md"
+@"
+# Third-party notices
+
+- QuantConnect LEAN Alpaca Brokerage plugin: https://github.com/QuantConnect/Lean.Brokerages.Alpaca/tree/$pluginCommit. The upstream README declares Apache-2.0; see `UPSTREAM-README.md` and `QUANTCONNECT-LEAN-LICENSE.txt`.
+- Alpaca .NET SDK (`Alpaca.Markets.dll`): https://github.com/QuantConnect/alpaca-trade-api-csharp/tree/$alpacaSdkLicenseCommit. Licensed Apache-2.0; see `ALPACA-SDK-LICENSE.txt`.
+"@ | Set-Content -LiteralPath $thirdPartyNoticesPath -Encoding utf8
+
 $destination = [IO.Path]::GetFullPath($DestinationDirectory)
 $manifestPath = Join-Path $destination ".lean-alpaca-plugin-manifest.json"
 if (Test-Path $destination) {
@@ -97,6 +113,7 @@ $manifest = [ordered]@{
     repository = $pluginRepository
     commit = $pluginCommit
     leanPackageVersion = $leanPackageVersion
+    alpacaSdkLicenseCommit = $alpacaSdkLicenseCommit
     files = $managedNames
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
