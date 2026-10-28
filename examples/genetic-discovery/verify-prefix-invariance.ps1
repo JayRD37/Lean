@@ -136,7 +136,7 @@ function Run-RawSplitCheck {
     if (-not (Test-Path -LiteralPath $algorithmLogPath)) { throw "Raw-mode split check log not found: $algorithmLogPath" }
     $actionsLog = Get-Content -LiteralPath $algorithmLogPath -Raw
     if ($actionsLog -notmatch 'split AAPL factor=0\.25 holdingQuantity=4') { throw "Raw-mode split did not adjust one AAPL share to four; inspect $algorithmLogPath" }
-    if ($actionsLog -notmatch 'dividend AAPL distribution=') { throw "Raw-mode dividend event was not delivered; inspect $algorithmLogPath" }
+    if ($actionsLog -notmatch 'dividend AAPL distribution=.* credited=[0-9.]+') { throw "Raw-mode dividend was not credited to the held position; inspect $algorithmLogPath" }
     return $algorithmLogPath
 }
 
@@ -180,10 +180,11 @@ $splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate 
 if ($splitLine -notmatch 'holdingQuantity=(-?[0-9.]+)' -or [decimal]$Matches[1] -eq 0) { throw "AAPL had no open position during the split event; inspect $($corporateActions.AlgorithmLogPath)" }
 if ($actionsLog -notmatch 'Corporate action: dividend symbol=AAPL distribution=') { throw "LEAN did not deliver an AAPL dividend event; inspect $($corporateActions.AlgorithmLogPath)" }
 Write-Output "PASS: LEAN delivered AAPL split and dividend events through the adjusted-data strategy run."
-Write-Output "PASS: LEAN adjusted one AAPL share to four and delivered a dividend under raw normalization."
+Write-Output "PASS: LEAN adjusted one AAPL share to four and credited a dividend under raw normalization."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
 Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"
+
 
 

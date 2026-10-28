@@ -32,8 +32,13 @@ public sealed class GeneticDiscoveryCorporateActionAlgorithm : QCAlgorithm
 
         if (slice.Dividends.TryGetValue(_aapl, out var dividend))
         {
+            if (Portfolio[_aapl].Quantity <= 0 || Portfolio[_aapl].TotalDividends <= 0)
+            {
+                throw new InvalidOperationException("The raw-mode dividend event did not credit the held AAPL position.");
+            }
+
             _dividendObserved = true;
-            Debug($"Corporate action check: dividend {dividend.Symbol} distribution={dividend.Distribution}");
+            Debug($"Corporate action check: dividend {dividend.Symbol} distribution={dividend.Distribution} credited={Portfolio[_aapl].TotalDividends}");
         }
 
         if (slice.Splits.TryGetValue(_aapl, out var split) && split.Type == SplitType.SplitOccurred)
@@ -56,4 +61,5 @@ public sealed class GeneticDiscoveryCorporateActionAlgorithm : QCAlgorithm
         if (!_dividendObserved) throw new InvalidOperationException("The AAPL dividend event was not observed.");
     }
 }
+
 
