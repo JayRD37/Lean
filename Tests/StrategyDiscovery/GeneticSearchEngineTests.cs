@@ -104,6 +104,40 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void RandomizedBaselineComparisonReportsEmpiricalTailProbabilityAndResolution()
+    {
+        var baseline = Enumerable.Range(1, 19).Select(index => index / 20d).ToArray();
+
+        var comparison = RandomizedBaselineAnalyzer.Compare(1d, baseline);
+
+        Assert.That(comparison.BaselineCount, Is.EqualTo(19));
+        Assert.That(comparison.MedianBaselineFitness, Is.EqualTo(0.5d));
+        Assert.That(comparison.BaselineScoresAtOrAboveCandidate, Is.Zero);
+        Assert.That(comparison.ProbabilityCandidateBeatsBaseline, Is.EqualTo(1d));
+        Assert.That(comparison.EmpiricalOneSidedPValue, Is.EqualTo(0.05d));
+        Assert.That(comparison.HasResolutionForFivePercentThreshold, Is.True);
+    }
+
+    [Test]
+    public void RandomizedBaselineComparisonHandlesTiesConservativelyAndFlagsSmallSamples()
+    {
+        var comparison = RandomizedBaselineAnalyzer.Compare(0.5d, [0.2d, 0.5d, 0.5d, 0.8d]);
+
+        Assert.That(comparison.BaselineScoresAtOrAboveCandidate, Is.EqualTo(3));
+        Assert.That(comparison.ProbabilityCandidateBeatsBaseline, Is.EqualTo(0.25d));
+        Assert.That(comparison.EmpiricalOneSidedPValue, Is.EqualTo(0.8d));
+        Assert.That(comparison.HasResolutionForFivePercentThreshold, Is.False);
+    }
+
+    [Test]
+    public void RandomizedBaselineComparisonRejectsEmptyAndNonFiniteSamples()
+    {
+        Assert.Throws<ArgumentException>(() => RandomizedBaselineAnalyzer.Compare(0.5d, Array.Empty<double>()));
+        Assert.Throws<ArgumentException>(() => RandomizedBaselineAnalyzer.Compare(0.5d, [0.2d, double.NaN]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RandomizedBaselineAnalyzer.Compare(double.PositiveInfinity, [0.2d]));
+    }
+
+    [Test]
     public void LifecycleMonitorSchedulesReviewsAndRetiresAfterRepeatedWeakPeriods()
     {
         var monitor = new StrategyLifecycleMonitor(

@@ -389,6 +389,20 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             .OrderBy(value => value)
             .ToArray();
         var randomBaselineMedian = randomBaselineScores.Length == 0 ? (double?)null : Median(randomBaselineScores);
+        var randomizedBaselineComparisons = randomBaselineScores.Length == 0
+            ? Array.Empty<object>()
+            : validation
+                .Where(item => item.Population != StrategyPopulation.RandomBaseline && item.RobustnessAdjustedFitness > GeneticSearchEngine.InvalidFitness)
+                .Select(item => (object)new
+                {
+                    item.Population,
+                    item.Genome,
+                    item.TrainingFitness,
+                    item.ValidationFitness,
+                    item.RobustnessAdjustedFitness,
+                    Comparison = RandomizedBaselineAnalyzer.Compare(item.RobustnessAdjustedFitness, randomBaselineScores)
+                })
+                .ToArray();
         var rankings = new
         {
             training = _engine.Results
@@ -399,9 +413,13 @@ public sealed class GeneticSearchOptimizationStrategy : IOptimizationStrategy
             {
                 baselineValidationCount = randomBaselineScores.Length,
                 medianBaselineFitness = randomBaselineMedian,
+                baselineCandidatesSelectedByTrainingFitness = true,
+                minimumBaselineCountForFivePercentResolution = RandomizedBaselineAnalyzer.MinimumBaselineCountForFivePercentResolution,
+                empiricalComparisonsAreMultipleTestingAdjusted = false,
                 evolvedStrategiesAboveBaselineMedian = randomBaselineMedian is null
                     ? 0
-                    : validation.Count(item => item.Population != StrategyPopulation.RandomBaseline && item.ValidationFitness > randomBaselineMedian.Value)
+                    : validation.Count(item => item.Population != StrategyPopulation.RandomBaseline && item.RobustnessAdjustedFitness > randomBaselineMedian.Value),
+                evolvedStrategyComparisons = randomizedBaselineComparisons
             }
         };
         try

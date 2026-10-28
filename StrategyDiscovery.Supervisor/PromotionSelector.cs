@@ -12,6 +12,12 @@ public static class PromotionSelector
         var root = JObjectConfig.Read(rankingsPath);
         var validation = root["validation"] as JArray
             ?? throw new InvalidDataException("Rankings file has no validation results.");
+        var baseline = root["randomizedBaselineComparison"] as JObject
+            ?? throw new InvalidDataException("Rankings file has no randomized baseline comparison.");
+        var baselineCount = baseline["baselineValidationCount"]?.Value<int>() ?? 0;
+        var medianBaselineFitness = baseline["medianBaselineFitness"]?.Value<double>();
+        if (baselineCount < 1 || medianBaselineFitness is null || !double.IsFinite(medianBaselineFitness.Value))
+            throw new InvalidDataException("Paper promotion requires at least one valid held-out randomized baseline result.");
         var candidates = new List<PromotedStrategy>();
 
         foreach (var item in validation.OfType<JObject>())
@@ -21,7 +27,7 @@ public static class PromotionSelector
             var population = (StrategyPopulation)populationValue.Value;
             if (population == StrategyPopulation.RandomBaseline) continue;
             var fitness = item["RobustnessAdjustedFitness"]?.Value<double>();
-            if (fitness is null || !double.IsFinite(fitness.Value) || fitness.Value < settings.MinimumRobustnessAdjustedFitness) continue;
+            if (fitness is null || !double.IsFinite(fitness.Value) || fitness.Value < settings.MinimumRobustnessAdjustedFitness || fitness.Value <= medianBaselineFitness.Value) continue;
 
             var robustness = item["ParameterRobustness"] as JObject;
             var requestedProbes = robustness?["RequestedProbeCount"]?.Value<int>() ?? 0;
@@ -53,6 +59,6 @@ public static class PromotionSelector
             .OrderByDescending(candidate => candidate.Fitness)
             .ThenBy(candidate => candidate.Genome.FastPeriod)
             .FirstOrDefault()
-            ?? throw new InvalidDataException("No evolved candidate passed validation, robustness, trade-count, and drawdown promotion gates.");
+            ?? throw new InvalidDataException("No evolved candidate passed randomized-baseline, validation, robustness, trade-count, and drawdown promotion gates.");
     }
 }

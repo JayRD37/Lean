@@ -89,8 +89,14 @@ public sealed class SupervisorSettings
             ?? throw new InvalidDataException("Optimizer config must set validation-window-count.");
         RequiredParameterProbeCount = optimizerSettings["parameter-robustness-probe-count"]?.Value<int>()
             ?? throw new InvalidDataException("Optimizer config must set parameter-robustness-probe-count.");
+        var randomBaselineSize = optimizerSettings["random-baseline-size"]?.Value<int>()
+            ?? throw new InvalidDataException("Optimizer config must set random-baseline-size.");
+        var validationBaselineCount = optimizerSettings["validation-baseline-count"]?.Value<int>()
+            ?? throw new InvalidDataException("Optimizer config must set validation-baseline-count.");
         if (RequiredValidationWindowCount < 1 || RequiredParameterProbeCount < 1)
             throw new InvalidDataException("Paper promotion requires at least one validation window and one parameter robustness probe.");
+        if (randomBaselineSize < 1 || validationBaselineCount < 1 || validationBaselineCount > randomBaselineSize)
+            throw new InvalidDataException("Paper promotion requires one or more validation baselines, bounded by random-baseline-size.");
 
         RequireEqual(
             optimizerSettings["maximum-positions"]?.Value<int>(),

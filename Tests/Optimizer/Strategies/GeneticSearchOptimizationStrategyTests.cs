@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using QuantConnect.Configuration;
 using QuantConnect.Genetic;
 using QuantConnect.Optimizer;
 using QuantConnect.Optimizer.Objectives;
@@ -183,6 +186,58 @@ public class GeneticSearchOptimizationStrategyTests
 
         Assert.That(strategy.Solution, Is.Null);
         Assert.That(pending, Is.Empty);
+    }
+
+    [Test]
+    public void RankingsPersistHeldOutRandomizedBaselineComparisonAndItsLimits()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "LeanGeneticRankingTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var previousDestination = Config.Get("results-destination-folder", string.Empty);
+        Config.Set("results-destination-folder", directory);
+        try
+        {
+            var strategy = new GeneticSearchOptimizationStrategy();
+            var pending = new Queue<ParameterSet>();
+            strategy.NewParameterSet += (_, parameterSet) => pending.Enqueue(parameterSet);
+            strategy.Initialize(
+                new Target("Statistics.Sharpe Ratio", new Maximization(), null),
+                Array.Empty<Constraint>(),
+                new HashSet<OptimizationParameter> { new StaticOptimizationParameter("discovery.marker", "1") },
+                new GeneticSearchOptimizationStrategySettings
+                {
+                    PopulationSize = 2,
+                    GenerationCount = 1,
+                    RandomBaselineSize = 2,
+                    EliteCount = 0,
+                    TournamentSize = 1,
+                    ValidationFinalistCount = 1,
+                    ValidationBaselineCount = 2,
+                    ValidationWindowCount = 1,
+                    ParameterRobustnessProbeCount = 0,
+                    AllowedTimeframes = "Daily"
+                });
+
+            strategy.PushNewResults(OptimizationResult.Initial);
+            while (pending.TryDequeue(out var training)) strategy.PushNewResults(CreateResult(training!));
+            while (pending.TryDequeue(out var validation)) strategy.PushNewResults(CreateResult(validation!));
+
+            var rankingsPath = Path.Combine(directory, "genetic-search-rankings.json");
+            var rankings = JObject.Parse(File.ReadAllText(rankingsPath));
+            var baseline = (JObject)rankings["randomizedBaselineComparison"]!;
+
+            Assert.That(baseline["baselineValidationCount"]!.Value<int>(), Is.EqualTo(2));
+            Assert.That(baseline["baselineCandidatesSelectedByTrainingFitness"]!.Value<bool>(), Is.True);
+            Assert.That(baseline["minimumBaselineCountForFivePercentResolution"]!.Value<int>(), Is.EqualTo(19));
+            Assert.That(baseline["empiricalComparisonsAreMultipleTestingAdjusted"]!.Value<bool>(), Is.False);
+            Assert.That(((JArray)baseline["evolvedStrategyComparisons"]!).Count, Is.EqualTo(2));
+            Assert.That(baseline["evolvedStrategyComparisons"]![0]!["Comparison"]!["EmpiricalOneSidedPValue"], Is.Not.Null);
+        }
+        finally
+        {
+            Config.Set("results-destination-folder", previousDestination);
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static OptimizationResult CreateResult(ParameterSet parameterSet)
