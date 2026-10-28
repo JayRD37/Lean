@@ -32,6 +32,14 @@ Start the local supervisor from the repository root:
 powershell -ExecutionPolicy Bypass -File .\scripts\start-genetic-paper.ps1
 ```
 
+To verify the paper key and secret first, run the read-only account check:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\check-alpaca-paper.ps1
+```
+
+It calls only Alpaca's paper `/v2/account` endpoint and submits no orders.
+
 The script prompts for both credentials with hidden input, passes them only to the child process, and requires the explicit `--enable-paper` flag. The supervisor has no live-money mode. Before running, review `supervisor.json` and `paper-config.overlay.json`.
 
 The default unattended configuration is **not ready for a real paper run yet**: `optimizer.json` validates through 2025, while checked-in US equity daily data ends on March 31, 2021. Obtain current, licensed LEAN-format history and update the date ranges before relying on its promotions. A real unattended paper session has not yet been verified; see [the integration notes](../../Documentation/GeneticDiscovery.md) for tested behavior and remaining limits.
@@ -39,5 +47,6 @@ The default unattended configuration is **not ready for a real paper run yet**: 
 ## What is evolving
 
 Each genome chooses a supported long-only strategy family (trend following, mean reversion, or breakout), a primary timeframe and optional slower confirmation timeframe, signal periods and thresholds, maximum positions, and exposure. Growth and Consistency populations evolve separately; random candidates form a comparison baseline. This is an independently implemented, bounded strategy search, not a reconstruction of Algory's protected internals.
+
 
 
