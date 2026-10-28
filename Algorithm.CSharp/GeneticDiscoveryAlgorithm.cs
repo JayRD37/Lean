@@ -110,6 +110,15 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnData(Slice slice)
     {
+        foreach (var split in slice.Splits.Values)
+        {
+            Debug($"Corporate action: split symbol={split.Symbol.Value} type={split.Type} factor={split.SplitFactor.ToString(CultureInfo.InvariantCulture)} reference={split.ReferencePrice.ToString(CultureInfo.InvariantCulture)} holdingQuantity={Portfolio[split.Symbol].Quantity.ToString(CultureInfo.InvariantCulture)}");
+        }
+        foreach (var dividend in slice.Dividends.Values)
+        {
+            Debug($"Corporate action: dividend symbol={dividend.Symbol.Value} distribution={dividend.Distribution.ToString(CultureInfo.InvariantCulture)}");
+        }
+
         if (_shutdownRequested || _brokerageSafety.MustLiquidate)
         {
             _shutdownRequested = true;
@@ -372,3 +381,4 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         }
     }
 }
+

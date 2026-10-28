@@ -30,7 +30,7 @@ function Read-JsonWithComments([string] $Path) {
     finally { $reader.Close() }
 }
 
-function Run-Backtest([string] $Name, [string] $EndDate) {
+function Run-Backtest([string] $Name, [string] $StartDate, [string] $EndDate, [string] $Symbol) {
     $runRoot = Join-Path $OutputRoot $Name
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $config = ConvertFrom-Json -InputObject (Read-JsonWithComments $baseConfig) -AsHashtable
@@ -43,9 +43,9 @@ function Run-Backtest([string] $Name, [string] $EndDate) {
     $config['parameters'] = $params
     $values = @{
         'discovery.phase' = 'Training'
-        'discovery.train-start' = '2019-01-01'
+        'discovery.train-start' = $StartDate
         'discovery.train-end' = $EndDate
-        'discovery.symbols' = 'SPY'
+        'discovery.symbols' = $Symbol
         'discovery.timeframe' = 'Daily'
         'discovery.family' = 'TrendFollowing'
         'discovery.fast-period' = '10'
@@ -94,7 +94,9 @@ function Run-Backtest([string] $Name, [string] $EndDate) {
     if (-not (Test-Path -LiteralPath $drawdownPath)) { throw "Persistent drawdown state was not created under $runRoot. See $logPath" }
     $drawdown = Get-Content -LiteralPath $drawdownPath -Raw | ConvertFrom-Json
     if ($drawdown.Version -ne 1 -or [decimal]$drawdown.HighWatermark -le 0) { throw "Persistent drawdown state is invalid at $drawdownPath" }
-    return [pscustomobject]@{ Result = $result; ResultPath = $resultPath; LogPath = $logPath; DrawdownPath = $drawdownPath }
+    $algorithmLogPath = Join-Path $runRoot 'GeneticDiscoveryAlgorithm-log.txt'
+    if (-not (Test-Path -LiteralPath $algorithmLogPath)) { throw "Algorithm log not found under $runRoot" }
+    return [pscustomobject]@{ Result = $result; ResultPath = $resultPath; LogPath = $logPath; AlgorithmLogPath = $algorithmLogPath; DrawdownPath = $drawdownPath }
 }
 
 function Get-NormalizedOrders($Result, [datetime] $Through) {
@@ -114,8 +116,9 @@ function Get-NormalizedOrders($Result, [datetime] $Through) {
 }
 
 $through = [datetime]'2021-02-10'
-$short = Run-Backtest 'prefix' '2021-02-15'
-$long = Run-Backtest 'full-history' '2021-03-31'
+$short = Run-Backtest 'prefix' '2019-01-01' '2021-02-15' 'SPY'
+$long = Run-Backtest 'full-history' '2019-01-01' '2021-03-31' 'SPY'
+$corporateActions = Run-Backtest 'corporate-actions' '2020-07-01' '2020-11-10' 'AAPL'
 $shortOrders = @(Get-NormalizedOrders $short.Result $through)
 $longOrders = @(Get-NormalizedOrders $long.Result $through)
 
@@ -129,7 +132,14 @@ if ($shortJson -cne $longJson) {
 }
 
 Write-Output "PASS: $($shortOrders.Count) filled orders are identical through $($through.ToString('yyyy-MM-dd'))."
+$actionsLog = Get-Content -LiteralPath $corporateActions.AlgorithmLogPath -Raw
+if ($actionsLog -notmatch 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25') { throw "LEAN did not deliver AAPL's 2020 four-for-one split event; inspect $($corporateActions.AlgorithmLogPath)" }
+$splitLine = ($actionsLog -split "`r?`n") | Where-Object { $_ -match 'Corporate action: split symbol=AAPL type=SplitOccurred factor=0\.25' } | Select-Object -Last 1
+if ($splitLine -notmatch 'holdingQuantity=(-?[0-9.]+)' -or [decimal]$Matches[1] -eq 0) { throw "AAPL had no open position during the split event; inspect $($corporateActions.AlgorithmLogPath)" }
+if ($actionsLog -notmatch 'Corporate action: dividend symbol=AAPL distribution=') { throw "LEAN did not deliver an AAPL dividend event; inspect $($corporateActions.AlgorithmLogPath)" }
+Write-Output "PASS: LEAN delivered AAPL split and dividend events through the adjusted-data strategy run."
 Write-Output "Prefix result: $($short.ResultPath)"
 Write-Output "Full-history result: $($long.ResultPath)"
 Write-Output "Persistent drawdown state verified in both runs."
 Write-Output "Run artifacts: $OutputRoot"
+
