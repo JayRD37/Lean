@@ -291,7 +291,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnOrderEvent(OrderEvent orderEvent)
     {
-        if (orderEvent.Status is OrderStatus.Filled or OrderStatus.PartiallyFilled)
+        if (_managedSymbols.Contains(orderEvent.Symbol) &&
+            (orderEvent.Status is OrderStatus.Filled or OrderStatus.PartiallyFilled or OrderStatus.Canceled or OrderStatus.Invalid))
         {
             _managedSymbols.OnPositionStateChanged(orderEvent.Symbol, Portfolio[orderEvent.Symbol].Invested);
         }
