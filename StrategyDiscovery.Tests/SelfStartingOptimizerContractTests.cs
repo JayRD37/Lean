@@ -59,7 +59,7 @@ public sealed class SelfStartingOptimizerContractTests
             },
             maximumConcurrentBacktests: 2));
 
-        var expectedBacktestCount = optimizer.GetTotalBacktestEstimate();
+        var expectedBacktestCount = optimizer.BacktestEstimate;
         optimizer.Start();
 
         Assert.That(optimizer.StartedParameterSets, Has.Count.EqualTo(2));
@@ -123,6 +123,7 @@ public sealed class SelfStartingOptimizerContractTests
         public List<ParameterSet> StartedParameterSets { get; } = new();
         public int RunningCount => RunningParameterSetForBacktest.Count;
         public int PendingCount => PendingParameterSet.Count;
+        public int BacktestEstimate => Strategy.GetTotalBacktestEstimate();
         public OptimizationResult? Solution => Strategy.Solution;
 
         protected override string RunLean(ParameterSet parameterSet, string backtestName)
@@ -144,6 +145,7 @@ public sealed class SelfStartingOptimizerContractTests
         }
     }
 }
+
 
 
 
