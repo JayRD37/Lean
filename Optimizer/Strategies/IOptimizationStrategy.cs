@@ -55,4 +55,11 @@ namespace QuantConnect.Optimizer.Strategies
         /// </summary>
         int GetTotalBacktestEstimate();
     }
+
+    /// <summary>
+    /// Marks an optimization strategy that seeds its own parameter sets and can run without input parameter ranges.
+    /// </summary>
+    public interface IOptimizationStrategySelfStarting : IOptimizationStrategy
+    {
+    }
 }

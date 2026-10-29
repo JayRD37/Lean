@@ -1,0 +1,20 @@
+{
+  "dotnet-executable": "dotnet",
+  "optimizer-launcher-dll": "../../Optimizer.Launcher/bin/Debug/QuantConnect.Optimizer.Launcher.dll",
+  "optimizer-working-directory": "../../Optimizer.Launcher/bin/Debug",
+  "optimizer-config": "optimizer.json",
+  "lean-launcher-dll": "../../Launcher/bin/Debug/QuantConnect.Lean.Launcher.dll",
+  "lean-working-directory": "../../Launcher/bin/Debug",
+  "lean-base-config": "../../Launcher/config.json",
+  "paper-config-overlay": "paper-config.overlay.json",
+  "output-directory": "../../supervisor-output",
+  "kill-switch-file": "../../Launcher/bin/Debug/emergency-stop",
+  "reoptimization-interval-hours": 168,
+  "emergency-stop-poll-seconds": 1,
+  "paper-shutdown-timeout-seconds": 30,
+  "paper-session-duration-hours": 0,
+  "paper-session-capital-limit": 0,
+  "minimum-validation-trades-per-window": 10,
+  "maximum-validation-drawdown": 0.08,
+  "minimum-robustness-adjusted-fitness": 0.0
+}

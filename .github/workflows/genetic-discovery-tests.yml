@@ -1,0 +1,69 @@
+name: Genetic Discovery Tests
+
+on:
+  push:
+    branches: ['*']
+    paths:
+      - 'Algorithm/**'
+      - 'Algorithm.CSharp/**'
+      - 'Brokerages/**'
+      - 'Brokerages.AlpacaDirect/**'
+      - 'Common/**'
+      - 'Launcher/**'
+      - 'Optimizer/**'
+      - 'StrategyDiscovery/**'
+      - 'StrategyDiscovery.Supervisor/**'
+      - 'StrategyDiscovery.Tests/**'
+      - 'scripts/check-alpaca-stream.ps1'
+      - 'scripts/start-genetic-paper.ps1'
+      - 'examples/genetic-discovery/**'
+      - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
+      - 'Tests/StrategyDiscovery/**'
+      - 'global.json'
+      - '.github/workflows/genetic-discovery-tests.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'Algorithm/**'
+      - 'Algorithm.CSharp/**'
+      - 'Brokerages/**'
+      - 'Brokerages.AlpacaDirect/**'
+      - 'Common/**'
+      - 'Launcher/**'
+      - 'Optimizer/**'
+      - 'StrategyDiscovery/**'
+      - 'StrategyDiscovery.Supervisor/**'
+      - 'StrategyDiscovery.Tests/**'
+      - 'scripts/check-alpaca-stream.ps1'
+      - 'scripts/start-genetic-paper.ps1'
+      - 'examples/genetic-discovery/**'
+      - 'Tests/Optimizer/Strategies/GeneticSearchOptimizationStrategyTests.cs'
+      - 'Tests/StrategyDiscovery/**'
+      - 'global.json'
+      - '.github/workflows/genetic-discovery-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genetic-discovery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.403
+
+      - name: Build the full LEAN solution
+        run: dotnet build QuantConnect.Lean.sln --configuration Release --verbosity quiet /p:WarningLevel=1
+
+      - name: Run genetic discovery and supervisor tests
+        run: dotnet test StrategyDiscovery.Tests/QuantConnect.Genetic.Tests.csproj --configuration Release --no-build --verbosity minimal

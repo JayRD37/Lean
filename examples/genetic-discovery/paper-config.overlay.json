@@ -1,0 +1,39 @@
+{
+  "alpaca-direct-api-key": "<set-through-your-secret-manager>",
+  "alpaca-direct-api-secret": "<set-through-your-secret-manager>",
+  "alpaca-paper-trading": true,
+  "environments": {
+    "live-alpaca-direct": {
+      "live-mode": true,
+      "live-mode-brokerage": "AlpacaDirectBrokerage",
+      "data-queue-handler": [ "AlpacaDirectDataQueueHandler" ],
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BrokerageTransactionHandler",
+      "history-provider": [ "BrokerageHistoryProvider", "SubscriptionDataReaderHistoryProvider" ]
+    }
+  },
+  "parameters": {
+    "discovery.allow-paper-trading": "true",
+    "discovery.family": "TrendFollowing",
+    "discovery.timeframe": "Daily",
+    "discovery.fast-period": "10",
+    "discovery.slow-period": "40",
+    "discovery.entry-tenths": "12",
+    "discovery.exit-tenths": "4",
+    "discovery.max-positions": "3",
+    "discovery.max-exposure-percent": "30",
+    "discovery.minimum-spread-bps": "5",
+    "discovery.max-correlation": "0.80",
+    "discovery.max-drawdown": "0.08",
+    "discovery.retirement-drawdown": "0.15",
+    "discovery.reevaluation-interval-days": "30",
+    "discovery.max-negative-review-periods": "3",
+    "discovery.symbols": "SPY|QQQ|IWM",
+    "discovery.universe-mode": "Configured",
+    "discovery.universe-size": "20",
+    "discovery.kill-switch-file": "emergency-stop"
+  }
+}

@@ -42,8 +42,8 @@ namespace QuantConnect.Optimizer.Launcher
         {
             _processByBacktestId = new ConcurrentDictionary<string, Process>();
 
-            _rootResultDirectory = Configuration.Config.Get("results-destination-folder",
-                Path.Combine(Directory.GetCurrentDirectory(), $"opt-{nodePacket.OptimizationId}"));
+            _rootResultDirectory = Path.GetFullPath(Configuration.Config.Get("results-destination-folder",
+                Path.Combine(Directory.GetCurrentDirectory(), $"opt-{nodePacket.OptimizationId}")));
             Directory.CreateDirectory(_rootResultDirectory);
 
             _leanLocation = Configuration.Config.Get("lean-binaries-location",
