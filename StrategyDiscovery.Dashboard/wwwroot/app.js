@@ -3,6 +3,7 @@ const escapeHtml = (value) => String(value ?? '—').replace(/[&<>"']/g, (c) => 
 let latestStatus = null;
 let allActivity = [];
 let strategies = [];
+let latestResearch = null;
 
 const labels = {
   optimization_started: 'Strategy search started',
@@ -185,6 +186,71 @@ function renderLineChart(host, points, name) {
   host.innerHTML = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(name)} with ${ys.length} points" preserveAspectRatio="none"><defs><linearGradient id="${fillId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#a4e46e" stop-opacity=".2"/><stop offset="1" stop-color="#a4e46e" stop-opacity="0"/></linearGradient></defs><path class="chart-grid" d="M${pad},${pad}H${width-pad} M${pad},${height/2}H${width-pad} M${pad},${height-pad}H${width-pad}"/><path class="chart-area" style="fill:url(#${fillId})" d="${area}"/><path class="chart-line" d="${line}"/>${markers}<text class="chart-label" x="${pad}" y="${height-2}">${escapeHtml(xLabel(points[0]?.x))}</text><text class="chart-label" x="${width-pad}" y="${height-2}" text-anchor="end">${escapeHtml(xLabel(points.at(-1)?.x))}</text><text class="chart-label" x="${width-pad}" y="13" text-anchor="end">${escapeHtml(Math.max(...ys).toFixed(4))}</text></svg>`;
 }
 
+const populationColors = {Growth:'#a4e46e',Consistency:'#82b8f5',RandomBaseline:'#c29aff'};
+const populationNames = {Growth:'Growth',Consistency:'Consistency',RandomBaseline:'Random baseline'};
+const number = (value, digits=3) => value == null || value === '' || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(digits);
+
+function renderResearch(data) {
+  latestResearch = data;
+  const rows = Array.isArray(data?.generations) ? data.generations : [];
+  const landscape = Array.isArray(data?.landscape) ? data.landscape : [];
+  const recent = Array.isArray(data?.recentEvaluations) ? data.recentEvaluations : [];
+  const populations = [...new Set(rows.map(row=>row.population))];
+  $('research-status').textContent = data?.available ? `${data.evaluationCount} EVALUATIONS` : 'NO HISTORY FILE';
+  $('research-legend').innerHTML = populations.map(pop=>`<span class="legend-item"><i style="--series:${populationColors[pop] || '#abb2bd'}"></i>${escapeHtml(populationNames[pop] || pop)}</span>`).join('') + (populations.length ? '<span class="legend-hint"><i></i>solid best · dashed median</span>' : '');
+  renderEvolution(rows, populations);
+  const generations = [...new Set(landscape.map(item=>item.generation))].sort((a,b)=>a-b);
+  const select = $('landscape-generation');
+  const current = select.value === '' ? Number.NaN : Number(select.value);
+  select.innerHTML = generations.map(g=>`<option value="${g}">Generation ${g}</option>`).join('');
+  if (generations.length) select.value = generations.includes(current) ? String(current) : String(generations.at(-1));
+  select.disabled = generations.length === 0;
+  const selected = Number(select.value);
+  const points = landscape.filter(item=>item.generation === selected);
+  renderLandscape(points);
+  $('landscape-count').textContent = `${points.length} GENOMES`;
+  $('evaluation-count').textContent = `${recent.length} RECENT`;
+  $('evaluation-rows').innerHTML = recent.length ? recent.map(item=>`<tr><td>${escapeHtml(stamp(item.utc))}</td><td>${escapeHtml(item.generation)}</td><td>${escapeHtml(populationNames[item.population] || item.population)}</td><td>${escapeHtml(item.phase)}</td><td>${escapeHtml(Number(item.fitness) <= -1e6 ? 'Rejected' : number(item.fitness,4))}</td><td>${escapeHtml(number(item.sharpeRatio,2))}</td><td>${escapeHtml(number(item.drawdown*100,2))}${item.drawdown == null?'':'%'}</td><td>${escapeHtml(item.tradeCount ?? '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">No evaluation history found for the configured results folder.</td></tr>';
+  const leaders = data?.latestGenerationProfiles || [];
+  $('leader-cards').innerHTML = leaders.length ? leaders.map(item=>{
+    const m=item.metrics||{}; const g=item.genome||{};
+    return `<article class="vault-card"><div class="vault-title"><div><h2>${escapeHtml(populationNames[item.population]||item.population)} leader</h2><p>Generation ${escapeHtml(item.generation)} · candidate ${escapeHtml(item.candidateId)}</p></div><span class="badge">FITNESS ${escapeHtml(number(item.fitness,4))}</span></div><div class="vault-meta"><span>SHARPE<b>${escapeHtml(number(m.sharpeRatio,2))}</b></span><span>RETURN<b>${escapeHtml(number(m.annualReturn*100,1))}${m.annualReturn==null?'':'%'}</b></span><span>DRAWDOWN<b>${escapeHtml(number(m.drawdown*100,1))}${m.drawdown==null?'':'%'}</b></span></div><div class="leader-genome">${escapeHtml(familyLabel(g.Family??g.family??'Strategy'))} · Fast ${escapeHtml(g.FastPeriod??'—')} / Slow ${escapeHtml(g.SlowPeriod??'—')} · ${escapeHtml(timeframeLabel(g.Timeframe??'—'))}</div></article>`;
+  }).join('') : '<div class="panel empty">No scored training candidates found in the latest generation.</div>';
+  const runDate = data?.campaignStartedAtUtc ? stamp(data.campaignStartedAtUtc) : 'all available history';
+  $('research-foot').textContent = data?.available ? `Source: ${data.resultSource} · campaign started ${runDate} · ${data.generationCount} generations · ${data.malformedRows || 0} malformed rows skipped` : 'Optimizer history has not been recorded at the configured results path.';
+}
+
+function renderEvolution(rows, populations) {
+  const host=$('evolution-chart');
+  if (!rows.length) {host.className='research-chart chart-empty';host.textContent='No optimizer training evaluations were found for this campaign.';return;}
+  const gens=[...new Set(rows.map(r=>r.generation))].sort((a,b)=>a-b);
+  const values=rows.flatMap(r=>[r.bestFitness,r.medianFitness]).map(Number).filter(Number.isFinite);
+  if (!values.length) {host.className='research-chart chart-empty';host.textContent='Training rows exist, but no finite fitness scores were recorded.';return;}
+  const W=1000,H=290,L=66,R=18,T=20,B=42,lo=Math.min(...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.12,.001),min=lo-pad,max=hi+pad;
+  const x=g=>L+(gens.indexOf(g)/Math.max(1,gens.length-1))*(W-L-R), y=v=>H-B-(v-min)/(max-min)*(H-T-B);
+  let svg=`<svg class="research-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Best and median training fitness by generation">`;
+  for(let i=0;i<5;i++){const value=min+(max-min)*i/4, yy=y(value);svg+=`<path class="chart-grid" d="M${L},${yy}H${W-R}"/><text class="chart-label" x="${L-9}" y="${yy+4}" text-anchor="end">${escapeHtml(number(value,3))}</text>`;}
+  gens.forEach(g=>{const xx=x(g);svg+=`<path class="chart-grid subtle-grid" d="M${xx},${T}V${H-B}"/><text class="chart-label" x="${xx}" y="${H-12}" text-anchor="middle">Gen ${g}</text>`;});
+  for(const pop of populations){const color=populationColors[pop]||'#abb2bd';for(const field of ['bestFitness','medianFitness']){const series=gens.map(g=>rows.find(r=>r.generation===g&&r.population===pop)).filter(r=>Number.isFinite(Number(r?.[field])));if(!series.length)continue;const d=series.map((r,i)=>`${i?'L':'M'}${x(r.generation)},${y(r[field])}`).join(' ');svg+=`<path d="${d}" fill="none" stroke="${color}" stroke-width="${field==='bestFitness'?2.4:1.5}" ${field==='medianFitness'?'stroke-dasharray="4 5"':''} vector-effect="non-scaling-stroke"/>`;for(const r of series)svg+=`<circle cx="${x(r.generation)}" cy="${y(r[field])}" r="3.5" fill="${color}" stroke="#0b0d12" stroke-width="1.5"><title>${escapeHtml(populationNames[pop]||pop)} · Gen ${r.generation} · ${field==='bestFitness'?'best':'median'} ${escapeHtml(number(r[field],4))} · n=${r.scoredCandidateCount}</title></circle>`;}}
+  svg+=`<text class="chart-label" x="${L}" y="14">FITNESS</text><text class="chart-label" x="${W-R}" y="${H-12}" text-anchor="end">GENERATION</text></svg>`;
+  host.className='research-chart';host.innerHTML=svg;
+}
+
+function renderLandscape(points) {
+  const host=$('landscape-chart');
+  const usable=points.filter(p=>Number.isFinite(Number(p.fastPeriod))&&Number.isFinite(Number(p.slowPeriod))&&Number.isFinite(Number(p.fitness)));
+  if(!usable.length){host.className='research-chart chart-empty';host.textContent='No fast/slow period genome values were recorded for this generation.';return;}
+  const W=1000,H=310,L=58,R=20,T=18,B=42;
+  const xs=usable.map(p=>Number(p.fastPeriod)),ys=usable.map(p=>Number(p.slowPeriod));
+  const xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  const x=v=>L+((v-xmin)/Math.max(1,xmax-xmin))*(W-L-R), y=v=>H-B-((v-ymin)/Math.max(1,ymax-ymin))*(H-T-B);
+  let svg=`<svg class="research-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Candidate genome landscape: fast period versus slow period">`;
+  for(let i=0;i<5;i++){const xv=xmin+(xmax-xmin)*i/4,yv=ymin+(ymax-ymin)*i/4,xx=x(xv),yy=y(yv);svg+=`<path class="chart-grid" d="M${xx},${T}V${H-B}"/><path class="chart-grid" d="M${L},${yy}H${W-R}"/><text class="chart-label" x="${xx}" y="${H-14}" text-anchor="middle">${escapeHtml(number(xv,0))}</text><text class="chart-label" x="${L-9}" y="${yy+4}" text-anchor="end">${escapeHtml(number(yv,0))}</text>`;}
+  for(const p of usable){const color=populationColors[p.population]||'#abb2bd',radius=Math.min(11,4+Math.sqrt(Number(p.candidateCount||1))*1.8),family=familyLabel(p.genome?.Family??'Strategy');svg+=`<circle class="landscape-point" cx="${x(p.fastPeriod)}" cy="${y(p.slowPeriod)}" r="${radius}" fill="${color}" fill-opacity=".72" stroke="${color}" stroke-width="1.3"><title>${escapeHtml(populationNames[p.population]||p.population)} · ${escapeHtml(family)} · Fast ${p.fastPeriod} / Slow ${p.slowPeriod} · Fitness ${escapeHtml(number(p.fitness,4))} · repeated ${p.candidateCount} · candidate ${p.bestCandidateId}</title></circle>`;}
+  svg+=`<text class="chart-label" x="${L}" y="14">SLOW PERIOD</text><text class="chart-label" x="${W-R}" y="${H-14}" text-anchor="end">FAST PERIOD</text></svg>`;
+  host.className='research-chart';host.innerHTML=svg;
+}
+
 async function loadHoldings() {
   try {
     const payload = await fetch('/api/portfolio',{cache:'no-store'}).then(r => r.json());
@@ -197,11 +263,12 @@ async function loadHoldings() {
 
 async function refreshAll() {
   try {
-    const [status, activity, vault, campaign] = await Promise.all([
+    const [status, activity, vault, campaign, research] = await Promise.all([
       fetch('/api/status',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`status ${r.status}`); return r.json(); }),
       fetch('/api/activity?limit=100',{cache:'no-store'}).then(r => r.json()),
       fetch('/api/strategies',{cache:'no-store'}).then(r => r.json()),
-      fetch('/api/campaign',{cache:'no-store'}).then(r => r.json())
+      fetch('/api/campaign',{cache:'no-store'}).then(r => r.json()),
+      fetch('/api/research',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`research ${r.status}`); return r.json(); })
     ]);
     allActivity = activity;
     strategies = vault;
@@ -211,6 +278,7 @@ async function refreshAll() {
     renderStrategies(vault);
     renderFitnessHistory(vault);
     renderCampaign(campaign);
+    renderResearch(research);
     applyActivityFilter();
     applyVaultFilter();
   } catch (error) {
@@ -248,6 +316,7 @@ window.addEventListener('hashchange', navigate);
 $('refresh').addEventListener('click', refreshAll);
 $('activity-filter').addEventListener('change', applyActivityFilter);
 $('vault-search').addEventListener('input', applyVaultFilter);
+$('landscape-generation').addEventListener('change', () => { if (latestResearch) renderResearch(latestResearch); });
 $('stop-button').addEventListener('click', () => $('stop-dialog').showModal());
 $('confirm-stop').addEventListener('click', async (event) => {
   event.preventDefault();
@@ -270,3 +339,4 @@ window.addEventListener('hashchange',navigate);
 navigate();
 refreshAll();
 setInterval(refreshAll, 5000);
+

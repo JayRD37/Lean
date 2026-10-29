@@ -22,6 +22,7 @@ app.MapGet("/api/activity", (int? limit) => Results.Json(ReadActivity(outputDire
 app.MapGet("/api/strategies", () => Results.Json(ReadStrategies(outputDirectory)));
 app.MapGet("/api/portfolio", () => Results.Json(ReadPortfolio(outputDirectory)));
 app.MapGet("/api/campaign", () => Results.Json(ReadCampaign(repositoryRoot, settings)));
+app.MapGet("/api/research", () => Results.Json(ReadResearch(repositoryRoot, settingsFile, settings, outputDirectory)));
 app.MapPost("/api/emergency-stop", (HttpContext context) =>
 {
     if (!string.Equals(context.Request.Headers.Origin, "http://127.0.0.1:5178", StringComparison.Ordinal))
@@ -166,6 +167,191 @@ static object ReadCampaign(string repositoryRoot, JsonNode? supervisorSettings)
     };
 }
 
+static object ReadResearch(string repositoryRoot, string settingsFile, JsonNode? supervisorSettings, string outputDirectory)
+{
+    var audit = ReadAudit(outputDirectory);
+    var latestStart = audit.LastOrDefault(item => item.Event == "optimization_started")?.Utc;
+    var settingsDirectory = Path.GetDirectoryName(settingsFile)!;
+    var optimizerConfigPath = Path.GetFullPath(Path.Combine(settingsDirectory,
+        supervisorSettings?["optimizer-config"]?.GetValue<string>() ?? "optimizer.json"));
+    var optimizerWorkingDirectory = Path.GetFullPath(Path.Combine(settingsDirectory,
+        supervisorSettings?["optimizer-working-directory"]?.GetValue<string>() ?? "..\\..\\Optimizer.Launcher\\bin\\Debug"));
+    var optimizer = File.Exists(optimizerConfigPath) ? JsonNode.Parse(File.ReadAllText(optimizerConfigPath)) : null;
+    var resultsDirectorySetting = optimizer?["results-destination-folder"]?.GetValue<string>();
+    var resultsDirectory = string.IsNullOrWhiteSpace(resultsDirectorySetting)
+        ? null
+        : Path.GetFullPath(Path.Combine(optimizerWorkingDirectory, resultsDirectorySetting));
+    var historyPath = resultsDirectory is null ? null : Path.Combine(resultsDirectory, "genetic-search-history.jsonl");
+    var rankingPath = resultsDirectory is null ? null : Path.Combine(resultsDirectory, "genetic-search-rankings.json");
+    var rows = new List<ResearchRecord>();
+    var malformedRows = 0;
+
+    if (historyPath is not null && File.Exists(historyPath))
+    {
+        foreach (var line in File.ReadLines(historyPath))
+        {
+            try
+            {
+                var row = JsonNode.Parse(line) as JsonObject;
+                if (row is null) { malformedRows++; continue; }
+                var utc = DateTimeOffset.TryParse(row["utc"]?.ToString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsedUtc)
+                    ? parsedUtc
+                    : (DateTimeOffset?)null;
+                if (utc is null || (latestStart is not null && utc < latestStart)) continue;
+                var generation = ReadInt(row["Generation"]);
+                var id = ReadInt(row["Id"]);
+                var population = ReadPopulation(row["Population"]);
+                var phase = ReadPhase(row["phase"]);
+                var fitness = ReadDouble(row["Fitness"]);
+                if (generation is null || id is null || population is null || phase is null || fitness is null) { malformedRows++; continue; }
+                rows.Add(new ResearchRecord(utc.Value, id.Value, generation.Value, population, phase,
+                    fitness.Value, row["Genome"]?.DeepClone() as JsonObject, row["Metrics"]?.DeepClone() as JsonObject));
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+            {
+                malformedRows++;
+            }
+        }
+    }
+
+    var training = rows.Where(item => item.Phase == "Training").ToArray();
+    var generations = training
+        .GroupBy(item => new { item.Generation, item.Population })
+        .OrderBy(group => group.Key.Generation)
+        .ThenBy(group => group.Key.Population)
+        .Select(group =>
+        {
+            var scores = group.Where(item => item.Metrics is not null && double.IsFinite(item.Fitness))
+                .Select(item => item.Fitness).OrderBy(value => value).ToArray();
+            var best = group.Where(item => item.Metrics is not null && double.IsFinite(item.Fitness))
+                .OrderByDescending(item => item.Fitness).ThenBy(item => item.Id).FirstOrDefault();
+            return new
+            {
+                generation = group.Key.Generation,
+                population = group.Key.Population,
+                candidateCount = group.Count(),
+                scoredCandidateCount = scores.Length,
+                bestFitness = scores.Length == 0 ? (double?)null : scores[^1],
+                medianFitness = scores.Length == 0 ? (double?)null : Median(scores),
+                bestGenome = best?.Genome,
+                bestCandidateId = best?.Id
+            };
+        }).ToArray();
+
+    var populationNames = new Dictionary<string, string>
+    {
+        ["Growth"] = "Growth",
+        ["Consistency"] = "Consistency",
+        ["RandomBaseline"] = "Random baseline"
+    };
+    var landscape = training
+        .Where(item => item.Genome is not null && item.Metrics is not null)
+        .GroupBy(item => new { item.Generation, item.Population, GenomeKey = item.Genome!.ToJsonString() })
+        .Select(group =>
+        {
+            var items = group.OrderBy(item => item.Id).ToArray();
+            var scores = items.Select(item => item.Fitness).Where(double.IsFinite).OrderBy(value => value).ToArray();
+            var best = items.OrderByDescending(item => item.Fitness).ThenBy(item => item.Id).First();
+            return new
+            {
+                generation = group.Key.Generation,
+                population = group.Key.Population,
+                genome = best.Genome,
+                fitness = best.Fitness,
+                candidateCount = items.Length,
+                fastPeriod = ReadInt(best.Genome?["FastPeriod"]),
+                slowPeriod = ReadInt(best.Genome?["SlowPeriod"]),
+                family = best.Genome?["Family"]?.ToString(),
+                timeframe = best.Genome?["Timeframe"]?.ToString(),
+                bestCandidateId = best.Id,
+                medianFitness = scores.Length == 0 ? (double?)null : Median(scores)
+            };
+        })
+        .OrderBy(item => item.generation).ThenBy(item => item.population).ThenBy(item => item.fastPeriod)
+        .ToArray();
+
+    var latestGeneration = training.Select(item => (int?)item.Generation).Max();
+    var profiles = latestGeneration is null ? Array.Empty<object>() : training
+        .Where(item => item.Generation == latestGeneration && item.Metrics is not null)
+        .GroupBy(item => item.Population)
+        .Select(group => group.OrderByDescending(item => item.Fitness).ThenBy(item => item.Id).First())
+        .Select(item => (object)new
+        {
+            candidateId = item.Id,
+            generation = item.Generation,
+            population = item.Population,
+            fitness = item.Fitness,
+            genome = item.Genome,
+            metrics = item.Metrics is null ? null : new
+            {
+                annualReturn = ReadDouble(item.Metrics["AnnualReturn"]),
+                sharpeRatio = ReadDouble(item.Metrics["SharpeRatio"]),
+                drawdown = ReadDouble(item.Metrics["Drawdown"]),
+                winRate = ReadDouble(item.Metrics["WinRate"]),
+                tradeCount = ReadInt(item.Metrics["TradeCount"]),
+                tradeReturns = item.Metrics["TradeReturns"]?.DeepClone()
+            }
+        }).ToArray();
+
+    var recent = rows.OrderByDescending(item => item.Utc).Take(16).Select(item => new
+    {
+        utc = item.Utc,
+        candidateId = item.Id,
+        generation = item.Generation,
+        population = item.Population,
+        phase = item.Phase,
+        fitness = item.Fitness,
+        annualReturn = ReadDouble(item.Metrics?["AnnualReturn"]),
+        sharpeRatio = ReadDouble(item.Metrics?["SharpeRatio"]),
+        drawdown = ReadDouble(item.Metrics?["Drawdown"]),
+        tradeCount = ReadInt(item.Metrics?["TradeCount"]),
+        genome = item.Genome
+    }).ToArray();
+
+    return new
+    {
+        available = historyPath is not null && File.Exists(historyPath),
+        campaignStartedAtUtc = latestStart,
+        historyUpdatedAtUtc = historyPath is not null && File.Exists(historyPath) ? File.GetLastWriteTimeUtc(historyPath) : (DateTime?)null,
+        resultSource = historyPath,
+        generationCount = generations.Select(item => item.generation).Distinct().Count(),
+        evaluationCount = rows.Count,
+        malformedRows,
+        populationLabels = populationNames,
+        generations,
+        landscape,
+        latestGeneration,
+        latestGenerationProfiles = profiles,
+        recentEvaluations = recent,
+        validationRankingAvailable = rankingPath is not null && File.Exists(rankingPath)
+    };
+}
+
+static int? ReadInt(JsonNode? node) => int.TryParse(node?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+
+static double? ReadDouble(JsonNode? node) => double.TryParse(node?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value) ? value : null;
+
+static string? ReadPopulation(JsonNode? node) => node?.ToString() switch
+{
+    "0" or "Growth" => "Growth",
+    "1" or "Consistency" => "Consistency",
+    "2" or "RandomBaseline" => "RandomBaseline",
+    _ => null
+};
+
+static string? ReadPhase(JsonNode? node) => node?.ToString() switch
+{
+    "0" or "Training" => "Training",
+    "1" or "Validation" => "Validation",
+    "2" or "Confirmation" => "Confirmation",
+    _ => null
+};
+
+static double Median(IReadOnlyList<double> sortedValues) => sortedValues.Count % 2 == 0
+    ? (sortedValues[sortedValues.Count / 2 - 1] + sortedValues[sortedValues.Count / 2]) / 2d
+    : sortedValues[sortedValues.Count / 2];
+
 static object ReadActivity(string outputDirectory, int limit) => ReadAudit(outputDirectory).TakeLast(limit).Reverse().ToArray();
 
 static List<AuditEntry> ReadAudit(string outputDirectory)
@@ -204,3 +390,5 @@ static bool IsProcessAlive(int pid)
 static int ParseInt(string? value) => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
 
 sealed record AuditEntry(DateTimeOffset Utc, string Event, JsonNode? Details);
+sealed record ResearchRecord(DateTimeOffset Utc, int Id, int Generation, string Population, string Phase, double Fitness, JsonObject? Genome, JsonObject? Metrics);
+
