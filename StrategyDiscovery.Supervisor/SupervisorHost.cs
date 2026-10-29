@@ -8,6 +8,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
 {
     private readonly string _auditFile = Path.Combine(settings.OutputDirectory, "supervisor-audit.jsonl");
     private readonly string _paperSessionStateFile = Path.Combine(settings.OutputDirectory, "active-paper-session.json");
+    private readonly string _paperSessionDeadlineFile = Path.Combine(settings.OutputDirectory, "paper-session-deadline.json");
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private readonly PaperRestartPolicy _restartPolicy = new(
         settings.MaximumConsecutivePaperFailures,
@@ -22,17 +23,42 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         Directory.CreateDirectory(settings.OutputDirectory);
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var runToken = sessionCancellation.Token;
-        var stopAtUtc = settings.PaperSessionDurationHours > 0
-            ? DateTimeOffset.UtcNow.AddHours(settings.PaperSessionDurationHours)
-            : (DateTimeOffset?)null;
-        if (stopAtUtc is { } scheduledStop)
+        DateTimeOffset? stopAtUtc = null;
+        var sessionTimerStarted = false;
+        async Task StartPaperSessionTimerAsync(bool recovering)
         {
-            sessionCancellation.CancelAfter(TimeSpan.FromHours(settings.PaperSessionDurationHours));
+            if (sessionTimerStarted || settings.PaperSessionDurationHours <= 0) return;
+            var recoveredDeadline = false;
+            if (recovering && File.Exists(_paperSessionDeadlineFile))
+            {
+                try
+                {
+                    stopAtUtc = JObject.Parse(await File.ReadAllTextAsync(_paperSessionDeadlineFile).ConfigureAwait(false))["stopAtUtc"]?.Value<DateTimeOffset>();
+                    recoveredDeadline = stopAtUtc is not null;
+                }
+                catch (Exception exception) when (exception is IOException or JsonException or FormatException)
+                {
+                    await AuditAsync("paper_session_deadline_unreadable", new { exception = exception.Message }).ConfigureAwait(false);
+                }
+            }
+
+            stopAtUtc ??= DateTimeOffset.UtcNow.AddHours(settings.PaperSessionDurationHours);
+            var remaining = stopAtUtc.Value - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) remaining = TimeSpan.Zero;
+            sessionCancellation.CancelAfter(remaining);
+            if (!recovering || !recoveredDeadline)
+            {
+                var temporaryPath = _paperSessionDeadlineFile + ".tmp";
+                await File.WriteAllTextAsync(temporaryPath, new JObject { ["stopAtUtc"] = stopAtUtc.Value }.ToString(Formatting.None)).ConfigureAwait(false);
+                File.Move(temporaryPath, _paperSessionDeadlineFile, overwrite: true);
+            }
+            sessionTimerStarted = true;
             await AuditAsync("paper_session_duration_set", new
             {
-                stopAtUtc = scheduledStop,
+                stopAtUtc,
                 durationHours = settings.PaperSessionDurationHours,
-                capitalLimit = settings.PaperSessionCapitalLimit
+                capitalLimit = settings.PaperSessionCapitalLimit,
+                recovering
             }).ConfigureAwait(false);
         }
         foreach (var outcome in PaperTradeOutcomeJournal.Read(settings.PaperTradeOutcomesFile))
@@ -52,6 +78,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 }
 
                 active = AdoptPaper(orphan);
+                await StartPaperSessionTimerAsync(recovering: true).ConfigureAwait(false);
                 if (orphan.Genome is not null && orphan.Fitness is { } fitness && orphan.Population is { } population)
                     activeStrategy = new PromotedStrategy(orphan.Genome, fitness, population, orphan.ValidationWindowCount);
                 await AuditAsync("orphaned_paper_process_adopted", new { orphan.ProcessId, orphan.StartedAtUtc, genome = orphan.Genome }).ConfigureAwait(false);
@@ -78,6 +105,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     activeStrategy = next;
                     if (!await PaperStartAllowedAsync("initial paper start after optimization").ConfigureAwait(false)) return;
                     active = StartPaper(next);
+                    await StartPaperSessionTimerAsync(recovering: false).ConfigureAwait(false);
                     continue;
                 }
 
