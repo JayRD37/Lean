@@ -147,6 +147,11 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnData(Slice slice)
     {
+        if (!IsWarmingUp)
+        {
+            Plot("Strategy Equity", "Equity", Portfolio.TotalPortfolioValue);
+        }
+
         foreach (var split in slice.Splits.Values)
         {
             Debug($"Corporate action: split symbol={split.Symbol.Value} type={split.Type} factor={split.SplitFactor.ToString(CultureInfo.InvariantCulture)} reference={split.ReferencePrice.ToString(CultureInfo.InvariantCulture)} holdingQuantity={Portfolio[split.Symbol].Quantity.ToString(CultureInfo.InvariantCulture)}");

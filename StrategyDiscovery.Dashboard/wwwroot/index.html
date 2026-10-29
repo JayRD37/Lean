@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d12"><title>LEAN Discovery</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="#overview" aria-label="LEAN Discovery home"><span class="brand-mark">L</span><span>LEAN<span class="brand-soft"> / DISCOVERY</span></span></a>
+      <div class="rail-label">WORKSPACE</div>
+      <nav id="navigation" aria-label="Workspace">
+        <a class="nav-item active" href="#overview" data-view="overview"><span class="nav-icon">◈</span>Command deck</a>
+        <a class="nav-item" href="#campaign" data-view="campaign"><span class="nav-icon">⌘</span>Campaign</a>
+        <a class="nav-item" href="#vault" data-view="vault"><span class="nav-icon">▤</span>Strategy vault</a>
+        <a class="nav-item" href="#portfolio" data-view="portfolio"><span class="nav-icon">◫</span>Portfolio</a>
+        <a class="nav-item" href="#insights" data-view="insights"><span class="nav-icon">⌁</span>Insights</a>
+        <a class="nav-item" href="#activity" data-view="activity"><span class="nav-icon">≋</span>Activity</a>
+      </nav>
+      <div class="rail-bottom"><span class="pulse-dot" id="connection-dot"></span><div><b id="connection-text">Connecting</b><small>Local supervisor</small></div><span class="tiny-caret">⌄</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="crumb"><span>WORKSPACE</span><i>/</i><b id="view-title">COMMAND DECK</b></div><div class="top-actions"><span class="market-chip"><span class="pulse-dot"></span> PAPER ENVIRONMENT</span><button class="icon-button" id="refresh" title="Refresh data" aria-label="Refresh data">↻</button><span class="avatar">JR</span></div></header>
+      <div class="content">
+        <section class="view active" id="view-overview">
+          <div class="page-heading"><div><div class="eyebrow">STRATEGY RESEARCH / LIVE SESSION</div><h1>Command deck</h1><p class="subheading">Monitor discovery, validation, and your paper session.</p></div><div class="heading-right"><span class="updated">Updated <b id="updated">—</b></span><button id="stop-button" class="button danger" disabled>Emergency stop</button></div></div>
+          <div class="status-banner" id="session-banner"><span class="status-ring"></span><div><strong id="session-title">Connecting to supervisor</strong><p id="session-subtitle">Reading local session state…</p></div><div class="banner-right" id="session-id">—</div></div>
+          <div class="metric-grid">
+            <article class="metric-card"><div class="metric-label">PAPER EQUITY <span>↗</span></div><div class="metric-value" id="equity">—</div><div class="metric-foot">From latest LEAN result</div></article>
+            <article class="metric-card"><div class="metric-label">NET PROFIT <span>◌</span></div><div class="metric-value" id="net-profit">—</div><div class="metric-foot" id="return-value">Return —</div></article>
+            <article class="metric-card"><div class="metric-label">OPEN POSITIONS <span>▥</span></div><div class="metric-value" id="holdings">—</div><div class="metric-foot" id="order-count">0 orders reported</div></article>
+            <article class="metric-card"><div class="metric-label">LEAN OUTPUT <span>⌁</span></div><div class="metric-value compact" id="data-state">—</div><div class="metric-foot" id="bar-count">0 equity points</div></article>
+          </div>
+          <div class="section-row"><div><div class="section-title">Candidate fitness history</div><div class="section-note">Recorded score for each candidate approved by the supervisor</div></div><span class="tag" id="fitness-point-tag">0 APPROVALS</span></div>
+          <div class="panel chart-panel"><div id="fitness-chart" class="chart-empty">No approved candidate history has been recorded.</div></div>
+          <div class="section-row"><div><div class="section-title">Evolution monitor</div><div class="section-note">Current promoted candidate and paper process state</div></div><span class="tag" id="lean-status">LEAN —</span></div>
+          <div class="monitor-grid">
+            <article class="panel genome-panel"><div class="panel-head"><div><div class="panel-kicker">ACTIVE CANDIDATE</div><h2 id="genome-name">No candidate loaded</h2></div><span class="badge" id="fitness">FITNESS —</span></div><div class="genome-table" id="genome-table"><div class="empty">Session metadata has not been recorded.</div></div><div class="panel-foot"><span>Promoted through validation</span><span id="validation-count">— windows</span></div></article>
+            <article class="panel signal-panel"><div class="panel-head"><div><div class="panel-kicker">SESSION HEALTH</div><h2>Paper execution</h2></div><span class="health-indicator" id="health-indicator">●</span></div><div class="health-row"><span>Supervisor</span><b id="supervisor-state">—</b></div><div class="health-row"><span>LEAN process</span><b id="process-state">—</b></div><div class="health-row"><span>Equity trace</span><b id="stream-state">—</b></div><div class="health-row"><span>Emergency stop</span><b id="kill-state">—</b></div><div class="panel-foot"><span>Paper mode only</span><span class="tag muted-tag">LIVE DISABLED</span></div></article>
+          </div>
+          <div class="section-row"><div><div class="section-title">Paper equity</div><div class="section-note">Strategy equity points written by the latest LEAN run</div></div><span class="tag" id="equity-point-tag">0 POINTS</span></div>
+          <div class="panel chart-panel"><div id="equity-chart" class="chart-empty">No equity curve has been written to the latest result file.</div></div>
+          <div class="section-row"><div><div class="section-title">Recent activity</div><div class="section-note">Supervisor audit trail · newest first</div></div><a class="text-link" href="#activity">View all activity →</a></div>
+          <div class="panel activity-panel"><div class="activity-list" id="recent-activity"><div class="empty">No audit events found.</div></div></div>
+          <footer>LOCAL RESEARCH CONSOLE <span>·</span> PAPER EXECUTION ONLY <span>·</span> <b id="run-folder">No run result</b></footer>
+        </section>
+        <section class="view" id="view-campaign"><div class="page-heading"><div><div class="eyebrow">STRATEGY RESEARCH</div><h1>Campaign</h1><p class="subheading">Configured search plan and candidate promotion history.</p></div><span class="tag">NEXT OPTIMIZATION CONFIG</span></div><div class="status-banner"><span class="status-ring"></span><div><strong>Research is supervised locally</strong><p>This console reflects the active process and its recorded audit events. Campaign controls are not enabled here.</p></div></div><div class="metric-grid" id="campaign-metrics"></div><div class="section-row"><div><div class="section-title">Walk-forward schedule</div><div class="section-note">Configured data partitions; dates are read from optimizer.json</div></div></div><div id="campaign-windows" class="window-grid"></div><p class="campaign-config-note" id="campaign-config-note"></p><div class="section-row"><div><div class="section-title">Candidate promotion history</div><div class="section-note">Strategies that passed the supervisor's paper promotion gate</div></div></div><div class="panel"><div id="campaign-history" class="activity-list"></div></div></section>
+        <section class="view" id="view-vault"><div class="page-heading"><div><div class="eyebrow">DISCOVERED STRATEGIES</div><h1>Strategy vault</h1><p class="subheading">Candidates approved for paper evaluation, sourced from supervisor history.</p></div><input id="vault-search" class="search" type="search" placeholder="Filter candidates…" aria-label="Filter candidates"></div><div id="vault-list" class="vault-grid"></div><div id="vault-no-results" class="panel empty" hidden>No candidates match this filter.</div></section>
+        <section class="view" id="view-portfolio"><div class="page-heading"><div><div class="eyebrow">EXPOSURE & POSITIONS</div><h1>Portfolio</h1><p class="subheading">Current account holdings from the latest LEAN result.</p></div></div><div class="metric-grid two"><article class="metric-card"><div class="metric-label">OPEN POSITIONS</div><div class="metric-value" id="portfolio-count">—</div></article><article class="metric-card"><div class="metric-label">ACCOUNT EQUITY</div><div class="metric-value" id="portfolio-equity">—</div></article></div><div class="panel table-panel"><table><thead><tr><th>SYMBOL</th><th>QUANTITY</th><th>MARK</th><th>HOLDING VALUE</th></tr></thead><tbody id="holdings-table"><tr><td colspan="4" class="empty">No holdings reported by latest run.</td></tr></tbody></table></div><p class="section-note disclaimer">Portfolio view reflects the latest local LEAN result file and can lag broker state.</p></section>
+        <section class="view" id="view-insights"><div class="page-heading"><div><div class="eyebrow">VALIDATION & ROBUSTNESS</div><h1>Insights</h1><p class="subheading">Recorded evidence about the current candidate. No inferred performance claims.</p></div></div><div class="metric-grid two"><article class="metric-card"><div class="metric-label">VALIDATION WINDOWS</div><div class="metric-value" id="insight-windows">—</div><div class="metric-foot">As recorded in promoted session metadata</div></article><article class="metric-card"><div class="metric-label">CANDIDATE FITNESS</div><div class="metric-value" id="insight-fitness">—</div><div class="metric-foot">Optimization score; not a live return</div></article></div><div class="panel insight-box"><div class="panel-kicker">CURRENT DATA EVIDENCE</div><h2 id="insight-data-state">Waiting for supervisor</h2><p id="insight-explanation">The dashboard will report bar delivery and the latest LEAN result state here.</p></div><div class="panel insight-box"><div class="panel-kicker">LIMITATIONS</div><p>Fitness and paper results do not establish future performance. This view does not independently verify broker fills, data-feed completeness, survivorship bias, or corporate-action correctness.</p></div></section>
+        <section class="view" id="view-activity"><div class="page-heading"><div><div class="eyebrow">AUDIT TRAIL</div><h1>Activity</h1><p class="subheading">Events persisted by the local genetic discovery supervisor.</p></div><select id="activity-filter" class="search"><option value="all">All events</option><option value="paper">Paper lifecycle</option><option value="strategy">Strategy discovery</option><option value="stop">Emergency stop</option></select></div><div class="panel"><div class="activity-list" id="all-activity"></div></div></section>
+      </div>
+    </main>
+  </div>
+  <dialog id="stop-dialog"><form method="dialog"><div class="dialog-kicker">EMERGENCY CONTROL</div><h2>Request paper shutdown?</h2><p>This writes the configured emergency-stop file. The supervisor should then stop its paper process cleanly.</p><div class="dialog-actions"><button class="button" value="cancel">Cancel</button><button class="button danger" id="confirm-stop" value="confirm">Request shutdown</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
