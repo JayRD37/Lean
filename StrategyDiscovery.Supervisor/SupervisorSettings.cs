@@ -25,10 +25,13 @@ public sealed class SupervisorSettings
     [JsonProperty("restart-backoff-seconds")] public int RestartBackoffSeconds { get; set; } = 30;
     [JsonProperty("emergency-stop-poll-seconds")] public int EmergencyStopPollSeconds { get; set; } = 1;
     [JsonProperty("paper-shutdown-timeout-seconds")] public int PaperShutdownTimeoutSeconds { get; set; } = 30;
+    [JsonProperty("paper-session-duration-hours")] public int PaperSessionDurationHours { get; set; }
+    [JsonProperty("paper-session-capital-limit")] public decimal PaperSessionCapitalLimit { get; set; }
     [JsonIgnore] public int MaximumPaperPositions { get; private set; } = 3;
     [JsonIgnore] public int MaximumPaperExposurePercent { get; private set; } = 30;
     [JsonIgnore] public int RequiredValidationWindowCount { get; private set; } = 1;
     [JsonIgnore] public int RequiredParameterProbeCount { get; private set; } = 1;
+    [JsonIgnore] public string PaperTradeOutcomesFile => Path.Combine(OutputDirectory, "paper-trade-outcomes.jsonl");
 
     public static SupervisorSettings Load(string path)
     {
@@ -73,6 +76,10 @@ public sealed class SupervisorSettings
         if (MaximumConsecutivePaperFailures < 1 || MinimumHealthyPaperRunMinutes < 1 || RestartBackoffSeconds < 1 ||
             EmergencyStopPollSeconds < 1 || PaperShutdownTimeoutSeconds < 1)
             throw new InvalidDataException("Paper failure limits, poll interval, shutdown timeout, and restart backoff must be positive.");
+        if (PaperSessionDurationHours < 0 || PaperSessionDurationHours > 720)
+            throw new InvalidDataException("paper-session-duration-hours must be zero (unlimited) or between one and 720.");
+        if (PaperSessionCapitalLimit < 0 || (PaperSessionDurationHours > 0 && PaperSessionCapitalLimit <= 0))
+            throw new InvalidDataException("A timed paper session requires a positive paper-session-capital-limit.");
         if (!double.IsFinite(MaximumValidationDrawdown) || MaximumValidationDrawdown is <= 0 or >= 1)
             throw new InvalidDataException("maximum-validation-drawdown must be between zero and one.");
         if (!double.IsFinite(MinimumRobustnessAdjustedFitness)) throw new InvalidDataException("minimum-robustness-adjusted-fitness must be finite.");

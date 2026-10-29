@@ -4,6 +4,8 @@ let latestStatus = null;
 let allActivity = [];
 let strategies = [];
 let latestResearch = null;
+let latestPreview = null;
+let previewLoaded = false;
 
 const labels = {
   optimization_started: 'Strategy search started',
@@ -261,14 +263,100 @@ async function loadHoldings() {
   }
 }
 
+const money = value => value === null || value === undefined ? '—' : Number(value).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2});
+const fixed = (value, places=3) => value === null || value === undefined ? '—' : Number(value).toFixed(places);
+function renderDecisionPreview(payload) {
+  latestPreview = payload;
+  previewLoaded = true;
+  $('preview-latest').textContent = payload.latestDataDate || '—';
+  $('preview-date').min = payload.confirmationStartDate || '';
+  $('preview-date').max = payload.latestDataDate || '';
+  if (payload.asOfDate && !$('preview-date').value) $('preview-date').value = payload.asOfDate;
+  if (payload.asOfDate) $('preview-date').value = payload.asOfDate;
+  if (!payload.available) {
+    $('preview-warning').innerHTML = `<b>Preview unavailable</b><span>${escapeHtml(payload.reason || 'No preview data available.')}</span>`;
+    $('preview-warning').classList.add('preview-warning-error');
+    $('preview-rows').innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(payload.reason || 'No preview data available.')}</td></tr>`;
+    $('preview-candidate-name').textContent = 'No preview available';
+    $('preview-candidate-score').textContent = '—';
+    $('preview-genome').innerHTML = '';
+    return;
+  }
+  $('preview-warning').classList.remove('preview-warning-error');
+  $('preview-warning').innerHTML = `<b>Historical only · no orders</b><span>${escapeHtml(payload.warning)}</span>`;
+  const genome = payload.genome || {};
+  const family = familyLabel(genome.Family ?? genome.family);
+  const timeframe = timeframeLabel(genome.Timeframe ?? genome.timeframe);
+  $('preview-candidate-name').textContent = `${family} · ${timeframe}`;
+  $('preview-candidate-score').textContent = payload.candidateFitness === null || payload.candidateFitness === undefined ? `PAPER GATE · ${escapeHtml(payload.population || 'candidate')}` : `FITNESS ${Number(payload.candidateFitness).toFixed(4)}`;
+  const fields = [
+    ['Fast period', genome.FastPeriod ?? genome.fastPeriod],
+    ['Slow period', genome.SlowPeriod ?? genome.slowPeriod],
+    ['Entry threshold', `${((genome.EntryThresholdTenths ?? genome.entryThresholdTenths) / 10).toFixed(1)}% / z`],
+    ['Exit threshold', `${((genome.ExitThresholdTenths ?? genome.exitThresholdTenths) / 10).toFixed(1)}% / z`],
+    ['Max positions', payload.maxPositions],
+    ['Max gross exposure', `${payload.maxExposurePercent}%`]
+  ];
+  $('preview-genome').innerHTML = fields.map(([label,value])=>`<div class="gene"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('');
+  $('preview-assumptions').textContent = `${payload.accountAssumption} Correlation limit ${(payload.maxCorrelation * 100).toFixed(0)}%; drawdown guard ${(payload.maxDrawdown * 100).toFixed(0)}%.`;
+  const rows = payload.symbols || [];
+  $('preview-signals').textContent = rows.filter(item=>item.hasSignal).length;
+  $('preview-positions').textContent = payload.selectedCount;
+  $('preview-exposure').textContent = `${Number(payload.targetExposurePercent).toFixed(1)}%`;
+  $('preview-asof-tag').textContent = `AS OF ${payload.asOfDate}`;
+  $('preview-rows').innerHTML = rows.map(item => `<tr class="${item.selected?'preview-selected':''}"><td>${escapeHtml(item.symbol)}</td><td>${money(item.close)}</td><td>${fixed(item.fastAverage,2)} / ${fixed(item.slowAverage,2)}</td><td>${item.spreadPercent===null?'—':`${fixed(item.spreadPercent,3)}%`} / ${fixed(item.zScore,3)}</td><td>${fixed(item.signalStrength,4)}</td><td><span class="decision-label ${item.selected?'decision-target':item.hasSignal?'decision-filtered':''}">${escapeHtml(item.status)}</span>${item.correlationToSelected===null?'':`<small class="decision-note">ρ ${Number(item.correlationToSelected).toFixed(3)} · limit ${Number(payload.maxCorrelation).toFixed(2)}</small>`}</td><td>${(Number(item.targetWeight)*100).toFixed(2)}%</td><td>${money(item.targetValue)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No configured symbols were evaluated.</td></tr>';
+}
+
+function renderOutcomes(payload) {
+  $('outcome-count').textContent = payload.tradeCount ?? 0;
+  $('outcome-wins-losses').textContent = `${payload.wins ?? 0} / ${payload.losses ?? 0}`;
+  $('outcome-hit-rate').textContent = `Win rate ${((payload.winRate || 0) * 100).toFixed(1)}% · ${payload.breakEven ?? 0} break-even`;
+  $('outcome-net-pnl').textContent = money(payload.netProfitLoss || 0);
+  $('outcome-net-pnl').classList.toggle('positive', Number(payload.netProfitLoss) > 0);
+  $('outcome-net-pnl').classList.toggle('negative', Number(payload.netProfitLoss) < 0);
+  $('outcome-seeds').textContent = payload.exactGenomesEligibleForSearchSeeding ?? 0;
+  $('outcome-recent-count').textContent = `${payload.recentTrades?.length ?? 0} RECORDS`;
+  if (!payload.tradeCount) {
+    $('outcome-learning-status').textContent = 'WAITING FOR PAPER TRADES';
+    $('outcome-learning-copy').textContent = 'Completed paper trades will be stored in the local outcome journal. After eight closed trades with positive net return for an exact genome, that genome can seed future Growth and Consistency searches; every seed is backtested again before it can pass the existing validation gates. No outcomes have been recorded yet.';
+  } else {
+    $('outcome-learning-status').textContent = payload.exactGenomesEligibleForSearchSeeding > 0 ? 'PAPER FEEDBACK ACTIVE' : 'GATHERING EVIDENCE';
+    $('outcome-learning-copy').textContent = `${payload.tradeCount} closed paper outcomes are stored locally. ${payload.exactGenomesEligibleForSearchSeeding} exact genome(s) currently meet the eight-trade positive-net-return seeding rule. Seeds only guide the next candidate search; they must earn fresh backtest and held-out validation results before promotion.`;
+  }
+  const rows = payload.recentTrades || [];
+  $('outcome-rows').innerHTML = rows.length ? rows.map(item => {
+    const genome = item.genome || {};
+    const name = `${familyLabel(genome.Family ?? genome.family)} · ${timeframeLabel(genome.Timeframe ?? genome.timeframe)} ${genome.FastPeriod ?? genome.fastPeriod}/${genome.SlowPeriod ?? genome.slowPeriod}`;
+    const outcome = item.result || '—';
+    return `<tr><td>${escapeHtml(stamp(item.exitTime))}</td><td>${escapeHtml(item.ticker)}</td><td>${escapeHtml(name)}</td><td class="${Number(item.netProfitLoss)>0?'positive':Number(item.netProfitLoss)<0?'negative':''}">${money(item.netProfitLoss)}</td><td>${Number(item.netReturnPercent).toFixed(3)}%</td><td><span class="decision-label ${outcome==='Win'?'decision-target':outcome==='Loss'?'decision-filtered':''}">${escapeHtml(outcome)}</span></td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">No completed paper trades have been recorded yet.</td></tr>';
+}
+
+async function loadDecisionPreview() {
+  $('preview-warning').innerHTML = '<b>Loading historical preview…</b><span>Reading the latest candidate and local daily bars.</span>';
+  try {
+    const params = new URLSearchParams();
+    if ($('preview-date').value) params.set('asOf', $('preview-date').value);
+    params.set('equity', $('preview-equity').value || '100000');
+    const response = await fetch(`/api/preview?${params}`,{cache:'no-store'});
+    const payload = await response.json();
+    renderDecisionPreview(payload);
+  } catch (error) {
+    previewLoaded = false;
+    $('preview-warning').innerHTML = `<b>Preview request failed</b><span>${escapeHtml(error.message || error)}</span>`;
+    $('preview-warning').classList.add('preview-warning-error');
+  }
+}
+
 async function refreshAll() {
   try {
-    const [status, activity, vault, campaign, research] = await Promise.all([
+    const [status, activity, vault, campaign, research, outcomes] = await Promise.all([
       fetch('/api/status',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`status ${r.status}`); return r.json(); }),
       fetch('/api/activity?limit=100',{cache:'no-store'}).then(r => r.json()),
       fetch('/api/strategies',{cache:'no-store'}).then(r => r.json()),
       fetch('/api/campaign',{cache:'no-store'}).then(r => r.json()),
-      fetch('/api/research',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`research ${r.status}`); return r.json(); })
+      fetch('/api/research',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`research ${r.status}`); return r.json(); }),
+      fetch('/api/outcomes',{cache:'no-store'}).then(r => { if(!r.ok) throw new Error(`outcomes ${r.status}`); return r.json(); })
     ]);
     allActivity = activity;
     strategies = vault;
@@ -279,6 +367,7 @@ async function refreshAll() {
     renderFitnessHistory(vault);
     renderCampaign(campaign);
     renderResearch(research);
+    renderOutcomes(outcomes);
     applyActivityFilter();
     applyVaultFilter();
   } catch (error) {
@@ -304,11 +393,12 @@ function applyVaultFilter() {
 }
 function navigate() {
   const key = location.hash.replace('#','') || 'overview';
-  const valid = ['overview','campaign','vault','portfolio','insights','activity'];
+  const valid = ['overview','campaign','preview','vault','portfolio','insights','activity'];
   const view = valid.includes(key) ? key : 'overview';
   document.querySelectorAll('.view').forEach(section => section.classList.toggle('active', section.id === `view-${view}`));
   document.querySelectorAll('.nav-item').forEach(link => link.classList.toggle('active', link.dataset.view === view));
-  $('view-title').textContent = ({overview:'COMMAND DECK',campaign:'CAMPAIGN',vault:'STRATEGY VAULT',portfolio:'PORTFOLIO',insights:'INSIGHTS',activity:'ACTIVITY'})[view];
+  $('view-title').textContent = ({overview:'COMMAND DECK',campaign:'CAMPAIGN',preview:'DECISION PREVIEW',vault:'STRATEGY VAULT',portfolio:'PORTFOLIO',insights:'INSIGHTS',activity:'ACTIVITY'})[view];
+  if (view === 'preview' && !previewLoaded) loadDecisionPreview();
 }
 
 $('navigation').addEventListener('click', e => { if (e.target.closest('a')) navigate(); });
@@ -317,6 +407,8 @@ $('refresh').addEventListener('click', refreshAll);
 $('activity-filter').addEventListener('change', applyActivityFilter);
 $('vault-search').addEventListener('input', applyVaultFilter);
 $('landscape-generation').addEventListener('change', () => { if (latestResearch) renderResearch(latestResearch); });
+$('preview-run').addEventListener('click', loadDecisionPreview);
+$('preview-date').addEventListener('change', () => { if (previewLoaded) loadDecisionPreview(); });
 $('stop-button').addEventListener('click', () => $('stop-dialog').showModal());
 $('confirm-stop').addEventListener('click', async (event) => {
   event.preventDefault();

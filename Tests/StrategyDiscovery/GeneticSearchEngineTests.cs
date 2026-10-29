@@ -80,6 +80,59 @@ public class GeneticSearchEngineTests
     }
 
     [Test]
+    public void PaperCapitalLimitCapsDollarExposureBelowBrokerAccountEquity()
+    {
+        var budget = PortfolioRiskBudget.Calculate(3, 0.30m, 100_000m, [2_000m], 10_000m);
+
+        Assert.That(budget.AvailablePositions, Is.EqualTo(2));
+        Assert.That(budget.AvailableGrossExposureFraction * 100_000m, Is.EqualTo(8_000m));
+    }
+
+    [Test]
+    public void PaperCapitalLimitNeverOverridesLowerConfiguredExposureCap()
+    {
+        var budget = PortfolioRiskBudget.Calculate(3, 0.10m, 100_000m, [], 50_000m);
+
+        Assert.That(budget.AvailableGrossExposureFraction * 100_000m, Is.EqualTo(10_000m));
+    }
+
+    [Test]
+    public void PaperExperienceSeedsBothObjectivesButNotTheRandomBaseline()
+    {
+        var seed = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 8, 40, 12, 4, 2, 30);
+        var options = CreateOptions() with { SeedGenomes = [seed] };
+
+        var candidates = new GeneticSearchEngine(options).Start();
+
+        Assert.That(candidates.Where(item => item.Generation == 0 && item.Population == StrategyPopulation.Growth).First().Genome, Is.EqualTo(seed));
+        Assert.That(candidates.Where(item => item.Generation == 0 && item.Population == StrategyPopulation.Consistency).First().Genome, Is.EqualTo(seed));
+        Assert.That(candidates.Where(item => item.Population == StrategyPopulation.RandomBaseline).All(item => item.Genome != seed), Is.True);
+    }
+
+    [Test]
+    public void LargeSearchStressRunCompletesDeterministicallyAcrossShuffledResults()
+    {
+        var options = CreateOptions() with
+        {
+            PopulationSize = 128,
+            GenerationCount = 20,
+            RandomBaselineSize = 64,
+            EliteCount = 8,
+            TournamentSize = 5,
+            MutationRate = 0.35,
+            Seed = 90210
+        };
+
+        var first = RunStressSearch(options);
+        var second = RunStressSearch(options);
+
+        Assert.That(first, Is.EqualTo(second));
+        Assert.That(first, Has.Count.EqualTo(20 * ((128 * 2) + 64)));
+        Assert.That(first.All(item => item.Genome.SlowPeriod > item.Genome.FastPeriod), Is.True);
+        Assert.That(first.Select(item => item.Generation).Distinct().Count(), Is.EqualTo(20));
+    }
+
+    [Test]
     public void SearchWaitsForEveryParallelEvaluationBeforeBreedingNextGeneration()
     {
         var engine = new GeneticSearchEngine(CreateOptions());
@@ -480,6 +533,27 @@ public class GeneticSearchEngineTests
     {
         var periodEffect = (genome?.FastPeriod ?? 10) / 1000d;
         return new StrategyBacktestMetrics(0.10 + periodEffect, 1.2, 0.08, 0.55, 40, 0.20);
+    }
+
+    private static IReadOnlyList<ScoredGenome> RunStressSearch(StrategyDiscoveryOptions options)
+    {
+        var engine = new GeneticSearchEngine(options);
+        var batch = engine.Start();
+        var random = new Random(12345);
+        while (!engine.IsComplete)
+        {
+            foreach (var candidate in batch.OrderBy(_ => random.Next()).ToArray())
+            {
+                var genome = candidate.Genome;
+                var returnValue = 0.04 + (genome.FastPeriod * 0.0005) - (genome.EntryThresholdTenths * 0.0001);
+                var drawdown = Math.Min(0.2, genome.SlowPeriod / 2000d);
+                var sharpe = Math.Clamp(genome.FastPeriod / 10d, -3d, 3d);
+                var metrics = new StrategyBacktestMetrics(returnValue, sharpe, drawdown, 0.45 + (genome.ExitThresholdTenths / 100d), 25, returnValue);
+                var next = engine.Submit(candidate.Id, metrics);
+                if (next.Count > 0) batch = next;
+            }
+        }
+        return engine.Results.ToArray();
     }
 }
 

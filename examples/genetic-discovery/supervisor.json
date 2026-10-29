@@ -12,6 +12,8 @@
   "reoptimization-interval-hours": 168,
   "emergency-stop-poll-seconds": 1,
   "paper-shutdown-timeout-seconds": 30,
+  "paper-session-duration-hours": 0,
+  "paper-session-capital-limit": 0,
   "minimum-validation-trades-per-window": 10,
   "maximum-validation-drawdown": 0.08,
   "minimum-robustness-adjusted-fitness": 0.0

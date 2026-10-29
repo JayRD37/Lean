@@ -252,19 +252,24 @@ public class SupervisorRecoveryTests
 
             var paperResultsDirectory = Path.Combine(folder, "paper-results-fixture");
             Directory.CreateDirectory(paperResultsDirectory);
+            var pluginDirectory = Path.Combine(folder, "plugins");
+            Directory.CreateDirectory(pluginDirectory);
+            File.WriteAllText(Path.Combine(pluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+            File.WriteAllText(Path.Combine(pluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             configPath = PaperConfigFactory.WriteEphemeralConfig(new JObject
             {
                 ["alpaca-paper-trading"] = true,
-                ["alpaca-direct-api-key"] = "PK-recovery-key",
-                ["alpaca-direct-api-secret"] = "recovery-secret",
+                ["alpaca-api-key"] = "PK-recovery-key",
+                ["alpaca-api-secret"] = "recovery-secret",
                 ["log-handler"] = "QuantConnect.Logging.FileLogHandler",
                 ["results-destination-folder"] = paperResultsDirectory,
+                ["plugin-directory"] = pluginDirectory,
                 ["environments"] = new JObject
                 {
-                    ["live-alpaca-direct"] = new JObject
+                    ["live-alpaca"] = new JObject
                     {
                         ["live-mode"] = true,
-                        ["live-mode-brokerage"] = "AlpacaDirectBrokerage"
+                        ["live-mode-brokerage"] = "AlpacaBrokerage"
                     }
                 },
                 ["parameters"] = new JObject
@@ -274,9 +279,9 @@ public class SupervisorRecoveryTests
                 }
             });
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, folder), Is.True);
-            File.WriteAllText(configPath, File.ReadAllText(configPath).Replace("AlpacaDirectBrokerage", "WrongBrokerage", StringComparison.Ordinal));
+            File.WriteAllText(configPath, File.ReadAllText(configPath).Replace("AlpacaBrokerage", "WrongBrokerage", StringComparison.Ordinal));
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, folder), Is.False);
-            File.WriteAllText(configPath, File.ReadAllText(configPath).Replace("WrongBrokerage", "AlpacaDirectBrokerage", StringComparison.Ordinal));
+            File.WriteAllText(configPath, File.ReadAllText(configPath).Replace("WrongBrokerage", "AlpacaBrokerage", StringComparison.Ordinal));
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, Path.Combine(folder, "different-stop"), folder), Is.False);
             Assert.That(PaperConfigFactory.IsRecoverablePaperConfig(configPath, killSwitchPath, Path.Combine(folder, "different-output")), Is.False);
             var genome = new StrategyGenome(StrategyFamily.TrendFollowing, StrategyTimeframe.Daily, 10, 40, 12, 4, 3, 30);
@@ -365,6 +370,7 @@ public class SupervisorRecoveryTests
         {
             ["algorithm-type-name"] = "GeneticDiscoveryAlgorithm",
             ["results-destination-folder"] = resultsDirectory,
+            ["optimization-strategy-settings"] = new JObject { ["seed"] = 1729 },
             ["fixture-mode"] = "optimizer",
             ["fixture-state-file"] = statePath
         }.ToString());
@@ -378,10 +384,10 @@ public class SupervisorRecoveryTests
             ["fixture-state-file"] = statePath,
             ["environments"] = new JObject
             {
-                ["live-alpaca-direct"] = new JObject
+                ["live-alpaca"] = new JObject
                 {
                     ["live-mode"] = true,
-                    ["live-mode-brokerage"] = "AlpacaDirectBrokerage"
+                    ["live-mode-brokerage"] = "AlpacaBrokerage"
                 }
             }
         }.ToString());
@@ -401,8 +407,15 @@ public class SupervisorRecoveryTests
             }
         }.ToString());
 
+        var alpacaPluginDirectory = Path.Combine(folder, "alpaca-plugin");
+        Directory.CreateDirectory(alpacaPluginDirectory);
+        File.WriteAllText(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+        File.WriteAllText(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"), string.Empty);
+
         var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
         var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var previousQuantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var previousQuantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
         var dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         var settings = new SupervisorSettings
         {
@@ -414,6 +427,7 @@ public class SupervisorRecoveryTests
             LeanWorkingDirectory = leanDirectory,
             LeanBaseConfig = baseConfigPath,
             PaperConfigOverlay = overlayPath,
+            AlpacaPluginDirectory = alpacaPluginDirectory,
             OutputDirectory = outputDirectory,
             KillSwitchFile = Path.Combine(folder, "emergency-stop"),
             ReoptimizationIntervalHours = 1,
@@ -433,6 +447,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "PK-restart-test-paper-key");
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "restart-test-paper-secret");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", "restart-test-user");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", "restart-test-token");
             var host = new SupervisorHost(settings);
             run = host.RunAsync(cancellation.Token);
 
@@ -476,6 +492,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", previousQuantConnectUserId);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", previousQuantConnectApiToken);
             if (run is not null && !run.IsCompleted)
             {
                 File.WriteAllText(settings.KillSwitchFile, "test cleanup");

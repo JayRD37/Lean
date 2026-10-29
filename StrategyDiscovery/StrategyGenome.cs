@@ -133,6 +133,7 @@ public sealed record StrategyDiscoveryOptions
     public int Seed { get; init; } = 1729;
     public int MaximumPositions { get; init; } = StrategyGenome.MaxMaxPositions;
     public int MaximumExposurePercent { get; init; } = StrategyGenome.MaxExposurePct;
+    public IReadOnlyList<StrategyGenome> SeedGenomes { get; init; } = Array.Empty<StrategyGenome>();
     public int MinimumTrades { get; init; } = 5;
     public double MaximumDrawdown { get; init; } = 0.20;
     public IReadOnlyList<StrategyTimeframe> AllowedTimeframes { get; init; } = [StrategyTimeframe.Daily, StrategyTimeframe.Hour];
@@ -158,6 +159,10 @@ public sealed record StrategyDiscoveryOptions
         if (AllowedTimeframes is null || AllowedTimeframes.Count == 0)
         {
             throw new ArgumentException("At least one timeframe must be allowed.", nameof(AllowedTimeframes));
+        }
+        if (SeedGenomes is null || SeedGenomes.Any(genome => genome is null || !AllowedTimeframes.Contains(genome.Timeframe)))
+        {
+            throw new ArgumentException("Seed genomes must use an allowed timeframe.", nameof(SeedGenomes));
         }
     }
 

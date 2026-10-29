@@ -118,7 +118,11 @@ public sealed class GeneticSearchEngine
     {
         if (_generation == 0)
         {
-            return Enumerable.Range(0, _options.PopulationSize).Select(_ => RandomGenome()).ToArray();
+            var initial = _options.SeedGenomes.Take(_options.PopulationSize)
+                .Select(genome => genome.Normalize(_options.AllowedTimeframes))
+                .ToList();
+            while (initial.Count < _options.PopulationSize) initial.Add(RandomGenome());
+            return initial;
         }
 
         var parents = _latestPopulation[population];

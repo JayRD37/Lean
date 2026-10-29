@@ -15,19 +15,28 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         TimeSpan.FromSeconds(settings.RestartBackoffSeconds));
     private bool _ownsKillSwitch;
     private string? _ownedKillSwitchMarker;
+    private readonly HashSet<string> _knownPaperOutcomeIds = new(StringComparer.Ordinal);
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        var apiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
-        var apiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
-        if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(apiSecret))
-            throw new InvalidOperationException("Set ALGORY_ALPACA_API_KEY and ALGORY_ALPACA_API_SECRET before starting paper trading.");
-        var quantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
-        var quantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
-        if (string.IsNullOrWhiteSpace(quantConnectUserId) || string.IsNullOrWhiteSpace(quantConnectApiToken))
-            throw new InvalidOperationException("Set ALGORY_QUANTCONNECT_USER_ID and ALGORY_QUANTCONNECT_API_TOKEN before starting the Alpaca paper integration. LEAN's official Alpaca plugin uses these credentials to validate its subscription entitlement.");
-
         Directory.CreateDirectory(settings.OutputDirectory);
+        using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var runToken = sessionCancellation.Token;
+        var stopAtUtc = settings.PaperSessionDurationHours > 0
+            ? DateTimeOffset.UtcNow.AddHours(settings.PaperSessionDurationHours)
+            : (DateTimeOffset?)null;
+        if (stopAtUtc is { } scheduledStop)
+        {
+            sessionCancellation.CancelAfter(TimeSpan.FromHours(settings.PaperSessionDurationHours));
+            await AuditAsync("paper_session_duration_set", new
+            {
+                stopAtUtc = scheduledStop,
+                durationHours = settings.PaperSessionDurationHours,
+                capitalLimit = settings.PaperSessionCapitalLimit
+            }).ConfigureAwait(false);
+        }
+        foreach (var outcome in PaperTradeOutcomeJournal.Read(settings.PaperTradeOutcomesFile))
+            _knownPaperOutcomeIds.Add(outcome.OutcomeId);
         using var instanceLock = SupervisorInstanceLock.Acquire(settings.OutputDirectory);
         PaperSession? active = null;
         PromotedStrategy? activeStrategy = null;
@@ -60,14 +69,15 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 return;
             }
 
-            while (!cancellationToken.IsCancellationRequested)
+            while (!runToken.IsCancellationRequested)
             {
                 if (active is null)
                 {
-                    var next = await OptimizeAndSelectAsync(cancellationToken).ConfigureAwait(false);
+                    _ = RequirePaperCredentials();
+                    var next = await OptimizeAndSelectAsync(runToken).ConfigureAwait(false);
                     activeStrategy = next;
                     if (!await PaperStartAllowedAsync("initial paper start after optimization").ConfigureAwait(false)) return;
-                    active = StartPaper(next, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
+                    active = StartPaper(next);
                     continue;
                 }
 
@@ -79,7 +89,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 {
                     var remaining = nextOptimizationAt - DateTime.UtcNow;
                     var pollInterval = TimeSpan.FromSeconds(settings.EmergencyStopPollSeconds);
-                    var pollDelay = Task.Delay(remaining < pollInterval ? remaining : pollInterval, cancellationToken);
+                    var pollDelay = Task.Delay(remaining < pollInterval ? remaining : pollInterval, runToken);
                     var completed = await Task.WhenAny(pollDelay, exited).ConfigureAwait(false);
                     if (completed == exited)
                     {
@@ -88,6 +98,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     }
 
                     await pollDelay.ConfigureAwait(false);
+                    CollectPaperTradeOutcomes(active);
                     if (File.Exists(settings.KillSwitchFile))
                     {
                         externalStopDetected = true;
@@ -99,6 +110,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 {
                     await AuditAsync("external_emergency_stop_detected", new { }).ConfigureAwait(false);
                     await WaitForPaperShutdownAsync(active, "external emergency stop").ConfigureAwait(false);
+                    CollectPaperTradeOutcomes(active);
                     await active.DisposeAsync().ConfigureAwait(false);
                     active = null;
                     return;
@@ -107,6 +119,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 if (processExited)
                 {
                     await exited.ConfigureAwait(false);
+                    CollectPaperTradeOutcomes(active);
                     var exitCode = active.Process.ExitCode;
                     var uptime = active.Uptime;
                     await AuditAsync("paper_process_exited", new { exitCode, genome = activeStrategy?.Genome }).ConfigureAwait(false);
@@ -127,7 +140,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                         if (activeStrategy is not null)
                         {
                             if (!await PaperStartAllowedAsync("paper restart after backoff").ConfigureAwait(false)) return;
-                            active = StartPaper(activeStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
+                            active = StartPaper(activeStrategy);
                             continue;
                         }
                     }
@@ -140,6 +153,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 {
                     await AuditAsync("external_emergency_stop_detected", new { }).ConfigureAwait(false);
                     await WaitForPaperShutdownAsync(active, "external emergency stop").ConfigureAwait(false);
+                    CollectPaperTradeOutcomes(active);
                     await active.DisposeAsync().ConfigureAwait(false);
                     active = null;
                     return;
@@ -148,7 +162,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 PromotedStrategy nextStrategy;
                 try
                 {
-                    using var optimizationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    using var optimizationCancellation = CancellationTokenSource.CreateLinkedTokenSource(runToken);
                     var optimization = OptimizeAndSelectAsync(optimizationCancellation.Token);
                     var emergencyStop = WaitForEmergencyStopAsync(optimizationCancellation.Token);
                     var completed = await Task.WhenAny(optimization, emergencyStop).ConfigureAwait(false);
@@ -156,8 +170,8 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     {
                         optimizationCancellation.Cancel();
                         try { await optimization.ConfigureAwait(false); }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (OperationCanceledException) when (!runToken.IsCancellationRequested) { }
+                        catch (OperationCanceledException) when (runToken.IsCancellationRequested) { throw; }
                         catch (Exception exception)
                         {
                             await AuditAsync("optimization_aborted_for_emergency_stop", new { exception = exception.Message }).ConfigureAwait(false);
@@ -172,7 +186,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     optimizationCancellation.Cancel();
                     nextStrategy = await optimization.ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (runToken.IsCancellationRequested)
                 {
                     throw;
                 }
@@ -198,7 +212,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     if (restartDelay > TimeSpan.Zero) await Task.Delay(restartDelay, cancellationToken).ConfigureAwait(false);
                     if (!await PaperStartAllowedAsync("paper restart after optimization").ConfigureAwait(false)) return;
                     activeStrategy = nextStrategy;
-                    active = StartPaper(nextStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
+                    active = StartPaper(nextStrategy);
                     continue;
                 }
 
@@ -219,18 +233,21 @@ public sealed class SupervisorHost(SupervisorSettings settings)
 
                 await AuditAsync("graceful_paper_strategy_shutdown_requested", new { oldGenome = activeStrategy?.Genome, newGenome = nextStrategy.Genome }).ConfigureAwait(false);
                 var stoppedCleanly = await WaitForPaperShutdownAsync(active, "scheduled strategy promotion").ConfigureAwait(false);
+                CollectPaperTradeOutcomes(active);
                 await active.DisposeAsync().ConfigureAwait(false);
                 active = null;
                 if (!stoppedCleanly) return;
-                if (cancellationToken.IsCancellationRequested) return;
+                if (runToken.IsCancellationRequested) return;
                 DeleteOwnedKillSwitch();
                 if (!await PaperStartAllowedAsync("scheduled strategy promotion").ConfigureAwait(false)) return;
                 activeStrategy = nextStrategy;
-                active = StartPaper(nextStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
+                active = StartPaper(nextStrategy);
             }
         }
         finally
         {
+            if (stopAtUtc is not null && !cancellationToken.IsCancellationRequested && runToken.IsCancellationRequested)
+                await AuditAsync("paper_session_scheduled_stop_reached", new { stopAtUtc }).ConfigureAwait(false);
             if (active is not null)
             {
                 if (!active.Process.HasExited && !File.Exists(settings.KillSwitchFile))
@@ -239,6 +256,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     await AuditAsync("graceful_paper_shutdown_requested", new { genome = activeStrategy?.Genome }).ConfigureAwait(false);
                 }
                 if (!active.Process.HasExited) await WaitForPaperShutdownAsync(active, "supervisor shutdown").ConfigureAwait(false);
+                CollectPaperTradeOutcomes(active);
                 await active.DisposeAsync().ConfigureAwait(false);
             }
         }
@@ -294,13 +312,35 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         var rankingsPath = settings.RankingsFile;
         var previousWriteTime = File.Exists(rankingsPath) ? File.GetLastWriteTimeUtc(rankingsPath) : DateTime.MinValue;
         var started = DateTime.UtcNow;
-        await AuditAsync("optimization_started", new { }).ConfigureAwait(false);
-        var exitCode = await RunChildAsync(
-            settings.OptimizerLauncherDll,
-            settings.OptimizerWorkingDirectory,
-            settings.OptimizerConfig,
-            Path.Combine(settings.OutputDirectory, $"optimizer-{started:yyyyMMdd-HHmmss}.log"),
-            cancellationToken).ConfigureAwait(false);
+        var searchSeed = unchecked((int)(started.Ticks ^ (started.Ticks >> 32)));
+        var experience = PaperTradeOutcomeJournal.Read(settings.PaperTradeOutcomesFile);
+        var seeds = PaperTradeOutcomeJournal.GetSeedGenomes(experience, maximumCount: 2, minimumTrades: 8);
+        var feedback = PaperTradeOutcomeJournal.Summarize(experience);
+        await AuditAsync("optimization_started", new
+        {
+            paperTradeCount = feedback.TradeCount,
+            paperWins = feedback.Wins,
+            paperLosses = feedback.Losses,
+            searchSeed,
+            seededGenomeCount = seeds.Count,
+            paperFeedback = "Exact genome seeds require at least eight closed paper trades and positive net return after fees."
+        }).ConfigureAwait(false);
+        var runConfigPath = WriteOptimizerFeedbackConfig(settings.OptimizerConfig, seeds, searchSeed, started);
+        int exitCode;
+        try
+        {
+            exitCode = await RunChildAsync(
+                settings.OptimizerLauncherDll,
+                settings.OptimizerWorkingDirectory,
+                runConfigPath,
+                Path.Combine(settings.OutputDirectory, $"optimizer-{started:yyyyMMdd-HHmmss}.log"),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!string.Equals(runConfigPath, settings.OptimizerConfig, StringComparison.OrdinalIgnoreCase) && File.Exists(runConfigPath))
+                File.Delete(runConfigPath);
+        }
         if (exitCode != 0) throw new InvalidOperationException($"LEAN optimizer exited with code {exitCode}.");
         if (!File.Exists(rankingsPath) || File.GetLastWriteTimeUtc(rankingsPath) <= previousWriteTime || File.GetLastWriteTimeUtc(rankingsPath) < started.AddSeconds(-2))
             throw new InvalidDataException("Optimizer did not produce a fresh rankings file.");
@@ -310,8 +350,9 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         return selected;
     }
 
-    private PaperSession StartPaper(PromotedStrategy strategy, string apiKey, string apiSecret, string quantConnectUserId, string quantConnectApiToken)
+    private PaperSession StartPaper(PromotedStrategy strategy)
     {
+        var credentials = RequirePaperCredentials();
         EnsurePortfolioDrawdownNotTripped();
         if (File.Exists(settings.KillSwitchFile)) throw new InvalidOperationException("Cannot start a paper process while the emergency stop file exists.");
         var optimizer = JObjectConfig.Read(settings.OptimizerConfig);
@@ -329,10 +370,16 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             resultsDirectory,
             settings.AlpacaPluginDirectory,
             settings.KillSwitchFile,
-            apiKey,
-            apiSecret,
-            quantConnectUserId,
-            quantConnectApiToken);
+            credentials.AlpacaKey,
+            credentials.AlpacaSecret,
+            credentials.QuantConnectUserId,
+            credentials.QuantConnectApiToken);
+        if (settings.PaperSessionCapitalLimit > 0)
+        {
+            var parameters = config["parameters"] as JObject
+                ?? throw new InvalidDataException("Generated paper config is missing algorithm parameters.");
+            parameters["discovery.paper-capital-limit"] = settings.PaperSessionCapitalLimit.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         var configPath = PaperConfigFactory.WriteEphemeralConfig(config);
         Process? process = null;
         try
@@ -353,7 +400,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 strategy.ValidationWindowCount);
             PaperProcessRecoveryGuard.Save(_paperSessionStateFile, identity);
             AuditAsync("paper_process_started", new { strategy.Genome, strategy.Fitness, config = "ephemeral" }).GetAwaiter().GetResult();
-            return new PaperSession(process, configPath, DateTimeOffset.UtcNow, _paperSessionStateFile, identity);
+            return new PaperSession(process, configPath, DateTimeOffset.UtcNow, _paperSessionStateFile, identity, logPath);
         }
         catch
         {
@@ -369,6 +416,19 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             PaperConfigFactory.DeleteEphemeralConfig(configPath);
             throw;
         }
+    }
+
+    private static PaperCredentials RequirePaperCredentials()
+    {
+        var apiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
+        var apiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(apiSecret))
+            throw new InvalidOperationException("Set ALGORY_ALPACA_API_KEY and ALGORY_ALPACA_API_SECRET before starting paper trading.");
+        var quantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var quantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
+        if (string.IsNullOrWhiteSpace(quantConnectUserId) || string.IsNullOrWhiteSpace(quantConnectApiToken))
+            throw new InvalidOperationException("Set ALGORY_QUANTCONNECT_USER_ID and ALGORY_QUANTCONNECT_API_TOKEN before starting the Alpaca paper integration. LEAN's official Alpaca plugin uses these credentials to validate its subscription entitlement.");
+        return new PaperCredentials(apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
     }
 
     private async Task<bool> PaperStartAllowedAsync(string reason)
@@ -396,7 +456,11 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             if (process.HasExited || !PaperProcessRecoveryGuard.MatchesStartTime(identity, actualStartTime))
                 throw new InvalidOperationException("The recorded LEAN process changed while the supervisor was recovering it.");
 
-            return new PaperSession(process, identity.ConfigPath!, identity.StartedAtUtc, _paperSessionStateFile, identity);
+            var config = JObjectConfig.Read(identity.ConfigPath!);
+            var resultsDirectory = config["results-destination-folder"]?.Value<string>();
+            var sessionId = string.IsNullOrWhiteSpace(resultsDirectory) ? "recovered" : Path.GetFileName(resultsDirectory).Replace("paper-results-", string.Empty, StringComparison.OrdinalIgnoreCase);
+            var logPath = Path.Combine(settings.OutputDirectory, $"paper-{sessionId}.log");
+            return new PaperSession(process, identity.ConfigPath!, identity.StartedAtUtc, _paperSessionStateFile, identity, logPath);
         }
         catch
         {
@@ -449,6 +513,37 @@ public sealed class SupervisorHost(SupervisorSettings settings)
     {
         if (line is null) return;
         lock (writerLock) File.AppendAllText(path, line + Environment.NewLine);
+    }
+
+    private string WriteOptimizerFeedbackConfig(string sourcePath, IReadOnlyList<StrategyGenome> seeds, int searchSeed, DateTime started)
+    {
+        var config = JObjectConfig.Read(sourcePath);
+        var settingsNode = config["optimization-strategy-settings"] as JObject
+            ?? throw new InvalidDataException("Optimizer config is missing optimization-strategy-settings.");
+        settingsNode["seed"] = searchSeed;
+        if (seeds.Count > 0) settingsNode["seed-genomes"] = JArray.FromObject(seeds);
+        else settingsNode.Remove("seed-genomes");
+        var output = Path.Combine(settings.OutputDirectory, $"optimizer-feedback-{started:yyyyMMdd-HHmmss-fffffff}.json");
+        File.WriteAllText(output, config.ToString(Formatting.Indented));
+        return output;
+    }
+
+    private void CollectPaperTradeOutcomes(PaperSession session)
+    {
+        if (!File.Exists(session.LogPath)) return;
+        try
+        {
+            foreach (var line in File.ReadLines(session.LogPath))
+            {
+                var marker = line.IndexOf("PAPER_TRADE_OUTCOME|", StringComparison.Ordinal);
+                if (marker < 0) continue;
+                var json = line[(marker + "PAPER_TRADE_OUTCOME|".Length)..].Trim();
+                if (!PaperTradeOutcomeJournal.TryParse(json, out var outcome) || outcome is null) continue;
+                PaperTradeOutcomeJournal.TryAppendUnique(settings.PaperTradeOutcomesFile, outcome, _knownPaperOutcomeIds);
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private bool TryCreateKillSwitch(string reason)
@@ -507,9 +602,11 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         string configPath,
         DateTimeOffset startedAt,
         string statePath,
-        PaperProcessIdentity identity) : IAsyncDisposable
+        PaperProcessIdentity identity,
+        string logPath) : IAsyncDisposable
     {
         public Process Process { get; } = process;
+        public string LogPath { get; } = logPath;
         public TimeSpan Uptime => DateTimeOffset.UtcNow - startedAt;
 
         public async ValueTask DisposeAsync()
@@ -523,4 +620,6 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             }
         }
     }
+
+    private sealed record PaperCredentials(string AlpacaKey, string AlpacaSecret, string QuantConnectUserId, string QuantConnectApiToken);
 }

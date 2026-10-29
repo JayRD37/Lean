@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using QuantConnect.Genetic;
+using QuantConnect.Indicators;
 
 var builder = WebApplication.CreateBuilder(args);
 var repositoryRoot = Path.GetFullPath(Environment.GetEnvironmentVariable("LEAN_DISCOVERY_ROOT") ?? Path.Combine(builder.Environment.ContentRootPath, ".."));
@@ -23,6 +26,8 @@ app.MapGet("/api/strategies", () => Results.Json(ReadStrategies(outputDirectory)
 app.MapGet("/api/portfolio", () => Results.Json(ReadPortfolio(outputDirectory)));
 app.MapGet("/api/campaign", () => Results.Json(ReadCampaign(repositoryRoot, settings)));
 app.MapGet("/api/research", () => Results.Json(ReadResearch(repositoryRoot, settingsFile, settings, outputDirectory)));
+app.MapGet("/api/preview", (string? asOf, decimal? equity) => Results.Json(ReadDecisionPreview(repositoryRoot, outputDirectory, asOf, equity ?? 100_000m)));
+app.MapGet("/api/outcomes", () => Results.Json(ReadPaperOutcomes(outputDirectory)));
 app.MapPost("/api/emergency-stop", (HttpContext context) =>
 {
     if (!string.Equals(context.Request.Headers.Origin, "http://127.0.0.1:5178", StringComparison.Ordinal))
@@ -164,6 +169,242 @@ static object ReadCampaign(string repositoryRoot, JsonNode? supervisorSettings)
         confirmationStartDate = options?["confirmation-start-date"]?.GetValue<string>() ?? "—",
         confirmationEndDate = options?["confirmation-end-date"]?.GetValue<string>() ?? "—",
         reoptimizationIntervalHours = supervisorSettings?["reoptimization-interval-hours"]?.GetValue<double>() ?? 0
+    };
+}
+
+static object ReadDecisionPreview(string repositoryRoot, string outputDirectory, string? asOfText, decimal equity)
+{
+    var overlayPath = Path.Combine(repositoryRoot, "examples", "genetic-discovery", "paper-config.overlay.json");
+    var optimizerPath = Path.Combine(repositoryRoot, "examples", "genetic-discovery", "optimizer.json");
+    var overlay = File.Exists(overlayPath) ? JsonNode.Parse(File.ReadAllText(overlayPath)) : null;
+    var optimizer = File.Exists(optimizerPath) ? JsonNode.Parse(File.ReadAllText(optimizerPath)) : null;
+    var settings = optimizer?["optimization-strategy-settings"];
+    var confirmationStart = DateOnly.TryParse(settings?["confirmation-start-date"]?.ToString(), CultureInfo.InvariantCulture, out var parsedStart)
+        ? parsedStart
+        : new DateOnly(2025, 1, 1);
+    var symbols = (overlay?["parameters"]?["discovery.symbols"]?.ToString() ?? "SPY|QQQ|IWM")
+        .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var maximumCorrelation = ReadDouble(overlay?["parameters"]?["discovery.max-correlation"]) ?? 0.80;
+    var maximumDrawdown = ReadDouble(overlay?["parameters"]?["discovery.max-drawdown"]) ?? 0.08;
+    var latestApproval = ReadAudit(outputDirectory).LastOrDefault(item => item.Event == "strategy_candidate_approved_for_paper");
+    var details = latestApproval?.Details as JsonObject;
+    var genomeNode = (details?["Genome"] ?? details?["genome"]) as JsonObject;
+    var latestDataDate = (DateOnly?)null;
+    var empty = new
+    {
+        available = false,
+        reason = "No approved candidate or local daily price archives are available.",
+        confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        latestDataDate = (string?)null
+    };
+    if (genomeNode is null) return empty;
+    if (equity is < 1_000m or > 100_000_000m)
+        return new { available = false, reason = "Enter a hypothetical account equity between $1,000 and $100,000,000.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+
+    var family = ParseGenomeEnum<StrategyFamily>(genomeNode["Family"] ?? genomeNode["family"]);
+    var timeframe = ParseGenomeEnum<StrategyTimeframe>(genomeNode["Timeframe"] ?? genomeNode["timeframe"]);
+    var confirmationTimeframe = ParseGenomeEnum<StrategyTimeframe>(genomeNode["ConfirmationTimeframe"] ?? genomeNode["confirmationTimeframe"]);
+    if (family is null || timeframe is null)
+        return new { available = false, reason = "The approved candidate record does not contain a supported strategy genome.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+    if (timeframe != StrategyTimeframe.Daily || confirmationTimeframe is not null)
+        return new { available = false, reason = "This preview currently supports daily candidates without a second confirmation timeframe.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+
+    var fastPeriod = ReadInt(genomeNode["FastPeriod"] ?? genomeNode["fastPeriod"]) ?? 10;
+    var slowPeriod = ReadInt(genomeNode["SlowPeriod"] ?? genomeNode["slowPeriod"]) ?? 40;
+    var entryTenths = ReadInt(genomeNode["EntryThresholdTenths"] ?? genomeNode["entryThresholdTenths"]) ?? 12;
+    var exitTenths = ReadInt(genomeNode["ExitThresholdTenths"] ?? genomeNode["exitThresholdTenths"]) ?? 4;
+    var maxPositions = ReadInt(genomeNode["MaxPositions"] ?? genomeNode["maxPositions"]) ?? 3;
+    var maxExposurePercent = ReadInt(genomeNode["MaxExposurePercent"] ?? genomeNode["maxExposurePercent"]) ?? 30;
+    if (fastPeriod <= 0 || slowPeriod <= fastPeriod || entryTenths <= exitTenths || exitTenths <= 0 || maxPositions <= 0 || maxExposurePercent is <= 0 or > 100)
+        return new { available = false, reason = "The approved candidate genome has invalid periods, thresholds, or risk limits.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+
+    var archiveDirectory = Path.Combine(repositoryRoot, "Data", "equity", "usa", "daily");
+    var histories = new Dictionary<string, SortedDictionary<DateOnly, PreviewBar>>(StringComparer.OrdinalIgnoreCase);
+    foreach (var ticker in symbols)
+    {
+        var path = Path.Combine(archiveDirectory, ticker.ToLowerInvariant() + ".zip");
+        if (!File.Exists(path)) continue;
+        histories[ticker] = DailyArchiveCache.Read(path, ReadDailyArchive);
+    }
+    if (histories.Count != symbols.Length || symbols.Length == 0)
+        return new { available = false, reason = "A configured symbol is missing its local LEAN daily archive.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+
+    var commonDates = histories.Values.Select(history => history.Keys.AsEnumerable()).Aggregate((left, right) => left.Intersect(right).Order().ToArray());
+    latestDataDate = commonDates.Select(date => (DateOnly?)date).LastOrDefault();
+    if (latestDataDate is null)
+        return new { available = false, reason = "The configured symbol archives do not have a common trading date.", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = (string?)null };
+    var requestedDate = DateOnly.TryParse(asOfText, CultureInfo.InvariantCulture, DateTimeStyles.None, out var requested) ? requested : latestDataDate.Value;
+    var asOfDate = commonDates.Where(date => date <= requestedDate).Select(date => (DateOnly?)date).LastOrDefault();
+    var latestDateText = latestDataDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    if (asOfDate is null || asOfDate < confirmationStart)
+        return new { available = false, reason = $"Choose a trading date on or after the candidate confirmation start ({confirmationStart:yyyy-MM-dd}) and on or before the local archive end ({latestDateText}).", confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), latestDataDate = latestDateText };
+
+    var states = symbols.ToDictionary(ticker => ticker, _ => new PreviewSymbolState(fastPeriod, slowPeriod, entryTenths / 10d), StringComparer.OrdinalIgnoreCase);
+    foreach (var date in commonDates.Where(date => date <= asOfDate.Value))
+    {
+        var allowSignals = date >= confirmationStart;
+        foreach (var ticker in symbols)
+        {
+            var bar = histories[ticker][date];
+            var state = states[ticker];
+            if (date == asOfDate.Value) state.Bar = bar;
+            var time = date.ToDateTime(TimeOnly.MinValue);
+            state.Fast.Update(time, bar.Close);
+            state.Slow.Update(time, bar.Close);
+            state.Volatility.Update(time, bar.Close);
+            state.Returns.Update(time, (double)bar.Close);
+            state.Breakout.Update(time, bar.High, bar.Low, bar.Close, allowSignals);
+            if (date != asOfDate.Value || !allowSignals || !state.Fast.IsReady || !state.Slow.IsReady || !state.Volatility.IsReady || state.Volatility.Current.Value <= 0)
+                continue;
+            var signal = StrategySignalEvaluator.Evaluate(family.Value, state.TrendEntered, state.MeanReversionEntered,
+                entryTenths / 10d, exitTenths / 10d, bar.Close, state.Fast.Current.Value, state.Slow.Current.Value,
+                state.Volatility.Current.Value, state.Breakout.Current);
+            state.TrendEntered = signal.TrendEntered;
+            state.MeanReversionEntered = signal.MeanReversionEntered;
+            state.Evaluation = signal;
+        }
+    }
+
+    var riskBudget = PortfolioRiskBudget.Calculate(maxPositions, maxExposurePercent / 100m, equity, Array.Empty<decimal>());
+    var candidates = states.Where(pair => pair.Value.Evaluation is { Strength: > 0 })
+        .OrderByDescending(pair => pair.Value.Evaluation!.Value.Strength).ThenBy(pair => pair.Key, StringComparer.Ordinal).ToArray();
+    var selected = new List<string>();
+    var decisions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    var correlations = new Dictionary<string, double?>(StringComparer.OrdinalIgnoreCase);
+    foreach (var candidate in candidates)
+    {
+        if (selected.Count >= riskBudget.AvailablePositions)
+        {
+            decisions[candidate.Key] = "Position limit reached";
+            correlations[candidate.Key] = null;
+            continue;
+        }
+        var correlation = selected.Count == 0 ? null : SynchronizedReturnHistory.Correlation(candidate.Value.Returns, states[selected[0]].Returns);
+        correlations[candidate.Key] = correlation;
+        if (selected.Any(existing => SynchronizedReturnHistory.Correlation(candidate.Value.Returns, states[existing].Returns) is not { } value || Math.Abs(value) >= maximumCorrelation))
+        {
+            decisions[candidate.Key] = "Filtered: correlation unavailable or above limit";
+            continue;
+        }
+        selected.Add(candidate.Key);
+        decisions[candidate.Key] = "Hypothetical target";
+    }
+    var targetWeight = selected.Count == 0 ? 0m : riskBudget.AvailableGrossExposureFraction / selected.Count;
+    var rows = symbols.Select(ticker =>
+    {
+        var state = states[ticker];
+        var signal = state.Evaluation;
+        var isSelected = selected.Contains(ticker, StringComparer.OrdinalIgnoreCase);
+        var decision = decisions.TryGetValue(ticker, out var status) ? status : "No signal";
+        return new
+        {
+            symbol = ticker,
+            close = state.Bar?.Close,
+            fastAverage = state.Fast.IsReady ? state.Fast.Current.Value : (decimal?)null,
+            slowAverage = state.Slow.IsReady ? state.Slow.Current.Value : (decimal?)null,
+            standardDeviation = state.Volatility.IsReady ? state.Volatility.Current.Value : (decimal?)null,
+            spreadPercent = signal is null ? (double?)null : signal.Value.Spread * 100d,
+            zScore = signal?.ZScore,
+            signalStrength = signal?.Strength,
+            hasSignal = signal is { Strength: > 0 },
+            selected = isSelected,
+            status = decision,
+            correlationToSelected = correlations.GetValueOrDefault(ticker),
+            targetWeight = isSelected ? targetWeight : 0m,
+            targetValue = isSelected ? decimal.Round(equity * targetWeight, 2) : 0m
+        };
+    }).ToArray();
+    var targetExposure = targetWeight * selected.Count;
+    return new
+    {
+        available = true,
+        asOfDate = asOfDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        requestedDate = requestedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        latestDataDate = latestDateText,
+        dataSource = "Local LEAN daily equity archives (Data/equity/usa/daily)",
+        candidateId = ReadInt(details?["CandidateId"] ?? details?["Id"]),
+        candidateFitness = ReadDouble(details?["Fitness"] ?? details?["fitness"]),
+        population = ReadPopulation(details?["Population"] ?? details?["population"]),
+        genome = genomeNode,
+        confirmationStartDate = confirmationStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        equityAssumption = equity,
+        accountAssumption = "Flat account; no existing holdings are included. Allocations are hypothetical estimates.",
+        maxCorrelation = maximumCorrelation,
+        maxDrawdown = maximumDrawdown,
+        maxPositions,
+        maxExposurePercent,
+        targetExposurePercent = targetExposure * 100m,
+        selectedCount = selected.Count,
+        ordersSubmitted = false,
+        historicalConfirmationOverlap = asOfDate >= confirmationStart,
+        warning = $"Historical-only dry run. Local price data ends {latestDateText}. This candidate was confirmed using data from {confirmationStart:yyyy-MM-dd}; these bars overlap that confirmation period. No current quotes, recommendation, or orders.",
+        symbols = rows
+    };
+}
+
+static SortedDictionary<DateOnly, PreviewBar> ReadDailyArchive(string path)
+{
+    var bars = new SortedDictionary<DateOnly, PreviewBar>();
+    using var archive = ZipFile.OpenRead(path);
+    var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase));
+    if (entry is null) return bars;
+    using var reader = new StreamReader(entry.Open());
+    while (reader.ReadLine() is { } line)
+    {
+        var fields = line.Split(',');
+        if (fields.Length < 6 || !DateOnly.TryParseExact(fields[0].AsSpan(0, Math.Min(8, fields[0].Length)), "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) continue;
+        if (!decimal.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var high) ||
+            !decimal.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var low) ||
+            !decimal.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var close)) continue;
+        bars[date] = new PreviewBar(high / 10_000m, low / 10_000m, close / 10_000m);
+    }
+    return bars;
+}
+
+static TEnum? ParseGenomeEnum<TEnum>(JsonNode? node) where TEnum : struct, Enum
+{
+    if (node is null) return null;
+    return Enum.TryParse<TEnum>(node.ToString(), true, out var value) ? value
+        : int.TryParse(node.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric) && Enum.IsDefined(typeof(TEnum), numeric)
+            ? (TEnum)Enum.ToObject(typeof(TEnum), numeric)
+            : null;
+}
+
+static object ReadPaperOutcomes(string outputDirectory)
+{
+    var outcomes = PaperTradeOutcomeJournal.Read(Path.Combine(outputDirectory, "paper-trade-outcomes.jsonl"));
+    var summary = PaperTradeOutcomeJournal.Summarize(outcomes);
+    var seeds = PaperTradeOutcomeJournal.GetSeedGenomes(outcomes, maximumCount: 2, minimumTrades: 8);
+    var factor = summary.ProfitFactor;
+    var byStrategy = outcomes.GroupBy(item => item.Genome)
+        .Select(group => new
+        {
+            family = group.Key.Family.ToString(),
+            timeframe = group.Key.Timeframe.ToString(),
+            genome = group.Key,
+            summary = PaperTradeOutcomeJournal.Summarize(group)
+        })
+        .OrderByDescending(item => item.summary.NetProfitLoss)
+        .ToArray();
+    return new
+    {
+        available = outcomes.Count > 0,
+        source = Path.Combine(outputDirectory, "paper-trade-outcomes.jsonl"),
+        tradeCount = summary.TradeCount,
+        wins = summary.Wins,
+        losses = summary.Losses,
+        breakEven = summary.BreakEven,
+        winRate = summary.WinRate,
+        netProfitLoss = summary.NetProfitLoss,
+        averageNetReturnPercent = summary.AverageNetReturnPercent,
+        profitFactor = factor is { } value && double.IsFinite(value) ? value : (double?)null,
+        unboundedProfitFactor = summary.Losses == 0 && summary.NetProfitLoss > 0,
+        exactGenomesEligibleForSearchSeeding = seeds.Count,
+        tradesRequiredForGenomeSeeding = 8,
+        strategyHistory = byStrategy,
+        recentTrades = outcomes.OrderByDescending(item => item.ExitTime).Take(100).ToArray()
     };
 }
 
@@ -391,3 +632,31 @@ static int ParseInt(string? value) => int.TryParse(value, NumberStyles.Integer, 
 
 sealed record AuditEntry(DateTimeOffset Utc, string Event, JsonNode? Details);
 sealed record ResearchRecord(DateTimeOffset Utc, int Id, int Generation, string Population, string Phase, double Fitness, JsonObject? Genome, JsonObject? Metrics);
+sealed record PreviewBar(decimal High, decimal Low, decimal Close);
+sealed class PreviewSymbolState(int fastPeriod, int slowPeriod, double entryThreshold)
+{
+    public SimpleMovingAverage Fast { get; } = new(fastPeriod);
+    public SimpleMovingAverage Slow { get; } = new(slowPeriod);
+    public StandardDeviation Volatility { get; } = new(slowPeriod);
+    public BreakoutChannel Breakout { get; } = new(fastPeriod, slowPeriod, entryThreshold);
+    public SynchronizedReturnHistory Returns { get; } = new(60);
+    public bool TrendEntered { get; set; }
+    public bool MeanReversionEntered { get; set; }
+    public StrategySignalEvaluation? Evaluation { get; set; }
+    public PreviewBar? Bar { get; set; }
+}
+static class DailyArchiveCache
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime ModifiedUtc, SortedDictionary<DateOnly, PreviewBar> Bars)> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public static SortedDictionary<DateOnly, PreviewBar> Read(string path, Func<string, SortedDictionary<DateOnly, PreviewBar>> loader)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var info = new FileInfo(fullPath);
+        if (Cache.TryGetValue(fullPath, out var cached) && cached.Length == info.Length && cached.ModifiedUtc == info.LastWriteTimeUtc)
+            return cached.Bars;
+        var updated = (info.Length, info.LastWriteTimeUtc, loader(fullPath));
+        Cache[fullPath] = updated;
+        return updated.Item3;
+    }
+}

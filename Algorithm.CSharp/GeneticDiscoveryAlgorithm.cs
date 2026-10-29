@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.IO;
+using System.Text.Json;
 using QuantConnect.Algorithm.Framework.Portfolio;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -33,6 +35,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private Resolution? _confirmationResolution;
     private int _maxPositions;
     private int _maxExposurePercent;
+    private decimal _paperCapitalLimit;
     private decimal _minimumSpreadBasisPoints;
     private double _maximumCorrelation;
     private double _maximumPortfolioDrawdown;
@@ -44,6 +47,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
     private bool _shutdownRequested;
     private bool _auditPortfolioSelection;
     private bool _useTopDollarVolumeUniverse;
+    private int _recordedClosedTrades;
     private int _universeSize;
     private PortfolioDrawdownGuard _drawdownGuard = null!;
     private StrategyLifecycleMonitor _lifecycleMonitor;
@@ -68,6 +72,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _exitThreshold = GetParameter("discovery.exit-tenths", 4) / 10d;
         _maxPositions = GetParameter("discovery.max-positions", 3);
         _maxExposurePercent = GetParameter("discovery.max-exposure-percent", 50);
+        _paperCapitalLimit = (decimal)GetParameter("discovery.paper-capital-limit", 0d);
         _minimumSpreadBasisPoints = (decimal)GetParameter("discovery.minimum-spread-bps", 5d);
         _maximumCorrelation = GetParameter("discovery.max-correlation", 0.85d);
         _maximumPortfolioDrawdown = GetParameter("discovery.max-drawdown", 0.10d);
@@ -130,6 +135,13 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             UniverseSettings.Leverage = 1m;
             AddUniverse(SelectTopDollarVolume);
         }
+        if (LiveMode)
+        {
+            Schedule.On(
+                DateRules.EveryDay(_symbols.Keys.First()),
+                TimeRules.Every(TimeSpan.FromMinutes(1)),
+                HandleScheduledRiskCheck);
+        }
 
         var warmupResolution = _confirmationResolution ?? _resolution;
         SetWarmUp(_slowPeriod + CorrelationWindow, warmupResolution);
@@ -147,9 +159,10 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
 
     public override void OnData(Slice slice)
     {
+        RecordClosedPaperTrades();
         if (!IsWarmingUp)
         {
-            Plot("Strategy Equity", "Equity", Portfolio.TotalPortfolioValue);
+            Plot("Strategy Equity", "Discovery", Portfolio.TotalPortfolioValue);
         }
 
         foreach (var split in slice.Splits.Values)
@@ -161,21 +174,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             Debug($"Corporate action: dividend symbol={dividend.Symbol.Value} distribution={dividend.Distribution.ToString(CultureInfo.InvariantCulture)}");
         }
 
-        if (_shutdownRequested || _brokerageSafety.MustLiquidate)
-        {
-            _shutdownRequested = true;
-            if (!_brokerageSafety.CanLiquidate) return;
-            LiquidateManagedPositions("emergency shutdown");
-            if (_managedSymbols.Symbols.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
-            return;
-        }
-
-        if (ShouldShutdown())
-        {
-            _shutdownRequested = true;
-            if (_brokerageSafety.CanLiquidate) LiquidateManagedPositions("drawdown or kill switch");
-            return;
-        }
+        if (TryHandleShutdown()) return;
 
         foreach (var state in _symbols.Values)
         {
@@ -216,34 +215,23 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             var price = Securities[state.Symbol].Price;
             if (price <= 0 || state.Volatility.Current.Value <= 0) continue;
 
-            var zScore = ((double)price - (double)state.Slow.Current.Value) / (double)state.Volatility.Current.Value;
-            double strength;
-            if (_family == StrategyFamily.TrendFollowing)
-            {
-                state.MeanReversionEntered = false;
-                var spread = (double)(state.Fast.Current.Value - state.Slow.Current.Value) / (double)price;
-                if (spread >= _entryThreshold / 100d) state.TrendEntered = true;
-                else if (spread <= _exitThreshold / 100d) state.TrendEntered = false;
-                strength = state.TrendEntered ? Math.Max(0, spread) : 0;
-            }
-            else
-            {
-                if (_family == StrategyFamily.MeanReversion)
-                {
-                    if (zScore <= -_entryThreshold) state.MeanReversionEntered = true;
-                    else if (zScore >= -_exitThreshold) state.MeanReversionEntered = false;
-                    strength = state.MeanReversionEntered ? Math.Max(0, -zScore) : 0;
-                }
-                else
-                {
-                    var breakout = state.Breakout.Current;
-                    strength = breakout.IsEntered ? breakout.Strength : 0;
-                }
-            }
+            var signal = StrategySignalEvaluator.Evaluate(
+                _family,
+                state.TrendEntered,
+                state.MeanReversionEntered,
+                _entryThreshold,
+                _exitThreshold,
+                price,
+                state.Fast.Current.Value,
+                state.Slow.Current.Value,
+                state.Volatility.Current.Value,
+                state.Breakout.Current);
+            state.TrendEntered = signal.TrendEntered;
+            state.MeanReversionEntered = signal.MeanReversionEntered;
 
-            if (strength > 0 && (_confirmationTimeframe is null || ConfirmationAgrees(state, price)))
+            if (signal.Strength > 0 && (_confirmationTimeframe is null || ConfirmationAgrees(state, price)))
             {
-                candidates.Add(new TradeSignal(state, strength));
+                candidates.Add(new TradeSignal(state, signal.Strength));
             }
         }
 
@@ -276,6 +264,58 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         _brokerageSafety.Disconnect();
         Debug("Brokerage disconnected; new strategy orders are paused until reconnection.");
     }
+
+    public override void OnEndOfAlgorithm()
+    {
+        RecordClosedPaperTrades();
+        base.OnEndOfAlgorithm();
+    }
+
+    private void RecordClosedPaperTrades()
+    {
+        if (!LiveMode || !Config.GetBool("alpaca-paper-trading", false)) return;
+        var trades = TradeBuilder.ClosedTrades;
+        var sessionId = Path.GetFileName(Config.Get("results-destination-folder", "paper-session"));
+        while (_recordedClosedTrades < trades.Count)
+        {
+            var trade = trades[_recordedClosedTrades++];
+            var symbol = trade.Symbols?.FirstOrDefault();
+            if (symbol is null) continue;
+            var netProfitLoss = trade.ProfitLoss - trade.TotalFees;
+            var notional = trade.EntryPrice * trade.Quantity;
+            if (notional <= 0) continue;
+            var result = netProfitLoss > 0 ? "Win" : netProfitLoss < 0 ? "Loss" : "BreakEven";
+            var outcome = new PaperTradeOutcome(
+                $"{sessionId}:{trade.Id}",
+                symbol.Value,
+                trade.EntryTime,
+                trade.ExitTime,
+                trade.EntryPrice,
+                trade.ExitPrice,
+                trade.Quantity,
+                trade.ProfitLoss,
+                trade.TotalFees,
+                netProfitLoss,
+                (double)(100m * netProfitLoss / notional),
+                result,
+                CurrentGenome(),
+                sessionId);
+            Log($"PAPER_TRADE_OUTCOME|{JsonSerializer.Serialize(outcome)}");
+        }
+    }
+
+    private StrategyGenome CurrentGenome() => new(
+        _family,
+        ParseTimeframe(_resolution),
+        _fastPeriod,
+        _slowPeriod,
+        (int)Math.Round(_entryThreshold * 10d),
+        (int)Math.Round(_exitThreshold * 10d),
+        _maxPositions,
+        _maxExposurePercent)
+    {
+        ConfirmationTimeframe = _confirmationTimeframe
+    };
 
     public override void OnSecuritiesChanged(SecurityChanges changes)
     {
@@ -356,7 +396,8 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             _maxPositions,
             _maxExposurePercent / 100m,
             Portfolio.TotalPortfolioValue,
-            externalHoldings);
+            externalHoldings,
+            _paperCapitalLimit);
     }
 
     private void LiquidateManagedPositions(string tag)
@@ -429,6 +470,25 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         return _drawdownGuard.Update(Portfolio.TotalPortfolioValue);
     }
 
+    private void HandleScheduledRiskCheck() => TryHandleShutdown();
+
+    private bool TryHandleShutdown()
+    {
+        if (_shutdownRequested || _brokerageSafety.MustLiquidate)
+        {
+            _shutdownRequested = true;
+            if (!_brokerageSafety.CanLiquidate) return true;
+            LiquidateManagedPositions("emergency shutdown");
+            if (_managedSymbols.Symbols.All(symbol => !Portfolio[symbol].Invested)) Quit("Emergency shutdown complete.");
+            return true;
+        }
+
+        if (!ShouldShutdown()) return false;
+        _shutdownRequested = true;
+        if (_brokerageSafety.CanLiquidate) LiquidateManagedPositions("drawdown or kill switch");
+        return true;
+    }
+
     private bool ConfirmationAgrees(SymbolState state, decimal price)
     {
         if (state.ConfirmationFast is not { IsReady: true } fast ||
@@ -439,13 +499,13 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
             return false;
         }
 
-        if (_family is StrategyFamily.TrendFollowing or StrategyFamily.Breakout)
-        {
-            return fast.Current.Value > slow.Current.Value;
-        }
-
-        var zScore = ((double)price - (double)slow.Current.Value) / (double)volatility.Current.Value;
-        return zScore <= -_exitThreshold;
+        return StrategySignalEvaluator.ConfirmationAgrees(
+            _family,
+            price,
+            fast.Current.Value,
+            slow.Current.Value,
+            volatility.Current.Value,
+            _exitThreshold);
     }
 
     private static double? Correlation(SymbolState first, SymbolState second)
@@ -458,6 +518,7 @@ public sealed class GeneticDiscoveryAlgorithm : QCAlgorithm
         if (_entryThreshold <= _exitThreshold || _exitThreshold <= 0) throw new ArgumentException("The entry threshold must exceed the positive exit threshold.");
         if (_maxPositions is < StrategyGenome.MinMaxPositions or > StrategyGenome.MaxMaxPositions) throw new ArgumentOutOfRangeException("discovery.max-positions");
         if (_maxExposurePercent is < StrategyGenome.MinExposurePct or > StrategyGenome.MaxExposurePct) throw new ArgumentOutOfRangeException("discovery.max-exposure-percent");
+        if (_paperCapitalLimit < 0) throw new ArgumentOutOfRangeException("discovery.paper-capital-limit");
         if (_universeSize is < 1 or > 100) throw new ArgumentOutOfRangeException("discovery.universe-size");
         if (_minimumSpreadBasisPoints < 0 || _minimumSpreadBasisPoints > 500) throw new ArgumentOutOfRangeException("discovery.minimum-spread-bps");
         if (_maximumCorrelation is < 0 or > 1) throw new ArgumentOutOfRangeException("discovery.max-correlation");

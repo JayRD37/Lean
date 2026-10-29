@@ -19,6 +19,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
     [JsonProperty("seed")] public int Seed { get; set; } = 1729;
     [JsonProperty("maximum-positions")] public int MaximumPositions { get; set; } = StrategyGenome.MaxMaxPositions;
     [JsonProperty("maximum-exposure-percent")] public int MaximumExposurePercent { get; set; } = StrategyGenome.MaxExposurePct;
+    [JsonProperty("seed-genomes")] public List<StrategyGenome> SeedGenomes { get; set; } = new();
     [JsonProperty("minimum-spread-bps")] public decimal MinimumSpreadBasisPoints { get; set; } = 5m;
     [JsonProperty("minimum-trades")] public int MinimumTrades { get; set; } = 5;
     [JsonProperty("monte-carlo-simulation-count")] public int MonteCarloSimulationCount { get; set; } = 1000;
@@ -62,6 +63,7 @@ public sealed class GeneticSearchOptimizationStrategySettings : OptimizationStra
             Seed = Seed,
             MaximumPositions = MaximumPositions,
             MaximumExposurePercent = MaximumExposurePercent,
+            SeedGenomes = SeedGenomes.ToArray(),
             MinimumTrades = MinimumTrades,
             MaximumDrawdown = MaximumDrawdown,
             AllowedTimeframes = timeframes,

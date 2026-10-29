@@ -143,8 +143,12 @@ public class PromotionSelectorTests
         {
             var basePath = Path.Combine(directory, "base.json");
             var overlayPath = Path.Combine(directory, "overlay.json");
+            var pluginDirectory = Path.Combine(directory, "plugins");
+            Directory.CreateDirectory(pluginDirectory);
+            File.WriteAllText(Path.Combine(pluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+            File.WriteAllText(Path.Combine(pluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             File.WriteAllText(basePath, "{\"environment\":\"backtesting\",\"algorithm-type-name\":\"Basic\",\"environments\":{}}");
-            File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca-direct\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaDirectBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
+            File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
             var resultsDirectory = Path.Combine(directory, "paper-results");
             Directory.CreateDirectory(resultsDirectory);
             var genome = new StrategyGenome(StrategyFamily.MeanReversion, StrategyTimeframe.Hour, 9, 35, 14, 3, 2, 25)
@@ -153,12 +157,12 @@ public class PromotionSelectorTests
             };
             var selected = new PromotedStrategy(genome, 0.5, StrategyPopulation.Consistency, 3);
 
-            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, Path.Combine(directory, "stop"), "PK-paper-key", "paper-secret");
+            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, pluginDirectory, Path.Combine(directory, "stop"), "PK-paper-key", "paper-secret", "test-user", "test-token");
 
-            Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca-direct"));
+            Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca"));
             Assert.That(config["alpaca-paper-trading"]?.Value<bool>(), Is.True);
-            Assert.That(config["alpaca-direct-api-key"]?.Value<string>(), Is.EqualTo("PK-paper-key"));
-            Assert.That(config["alpaca-direct-api-secret"]?.Value<string>(), Is.EqualTo("paper-secret"));
+            Assert.That(config["alpaca-api-key"]?.Value<string>(), Is.EqualTo("PK-paper-key"));
+            Assert.That(config["alpaca-api-secret"]?.Value<string>(), Is.EqualTo("paper-secret"));
             Assert.That(config["results-destination-folder"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(resultsDirectory)));
             Assert.That(config["log-handler"]?.Value<string>(), Is.EqualTo("QuantConnect.Logging.FileLogHandler"));
             Assert.That(config["parameters"]?["discovery.allow-paper-trading"]?.Value<string>(), Is.EqualTo("true"));
@@ -169,9 +173,11 @@ public class PromotionSelectorTests
             Assert.That(config["parameters"]?["discovery.drawdown-state-file"]?.Value<string>(),
                 Is.EqualTo(Path.Combine(directory, "portfolio-drawdown-state.json")));
 
-            Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
+            var configWithDifferentCredentialText = PaperConfigFactory.Create(
                 basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory,
-                Path.Combine(directory, "stop"), "bad-live-key", "paper-secret"));
+                pluginDirectory, Path.Combine(directory, "stop"), "bad-live-key", "paper-secret", "test-user", "test-token");
+            Assert.That(configWithDifferentCredentialText["alpaca-paper-trading"]?.Value<bool>(), Is.True,
+                "The generated runtime must remain pinned to paper mode regardless of the credential string.");
         }
         finally
         {
@@ -185,7 +191,7 @@ public class PromotionSelectorTests
         Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
             "missing-base.json", "missing-overlay.json", "GeneticDiscoveryAlgorithm",
             new PromotedStrategy(Genome(10, 40, 12, 4, 3, 30).ToObject<StrategyGenome>()!, 0.5, StrategyPopulation.Growth, 1),
-            "results", "stop", string.Empty, string.Empty));
+            "results", "plugin", "stop", string.Empty, string.Empty, string.Empty, string.Empty));
     }
 
     [Test]
@@ -200,6 +206,10 @@ public class PromotionSelectorTests
         {
             File.WriteAllText(Path.Combine(optimizerDirectory, "launcher.dll"), string.Empty);
             File.WriteAllText(Path.Combine(leanDirectory, "launcher.dll"), string.Empty);
+            var pluginDirectory = Path.Combine(directory, "plugins");
+            Directory.CreateDirectory(pluginDirectory);
+            File.WriteAllText(Path.Combine(pluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
+            File.WriteAllText(Path.Combine(pluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig());
             File.WriteAllText(Path.Combine(directory, "base.json"), "{}");
             File.WriteAllText(Path.Combine(directory, "overlay.json"), PaperOverlay());
@@ -265,6 +275,7 @@ public class PromotionSelectorTests
           "lean-working-directory": "lean",
           "lean-base-config": "base.json",
           "paper-config-overlay": "overlay.json",
+          "alpaca-plugin-directory": "plugins",
           "output-directory": "output",
           "kill-switch-file": "stop",
           "maximum-validation-drawdown": 0.08

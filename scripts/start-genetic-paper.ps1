@@ -1,7 +1,13 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string] $SupervisorConfig
+    [string] $SupervisorConfig,
+    [Parameter()]
+    [ValidateRange(0, 720)]
+    [int] $SessionDurationHours = 0,
+    [Parameter()]
+    [ValidateRange(0, 1000000000)]
+    [decimal] $PaperCapitalLimit = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,6 +16,32 @@ $env:PSModulePath = Join-Path $PSHOME "Modules"
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($SupervisorConfig)) {
     $SupervisorConfig = Join-Path $repositoryRoot "examples/genetic-discovery/supervisor.json"
+}
+$SupervisorConfig = (Resolve-Path -LiteralPath $SupervisorConfig).Path
+$effectiveSupervisorConfig = $SupervisorConfig
+$temporarySupervisorConfig = $null
+if (($SessionDurationHours -gt 0) -xor ($PaperCapitalLimit -gt 0)) {
+    throw "Set both -SessionDurationHours and -PaperCapitalLimit for a time-boxed paper trial."
+}
+if ($SessionDurationHours -gt 0) {
+    $sessionSettings = Get-Content -LiteralPath $SupervisorConfig -Raw | ConvertFrom-Json
+    $supervisorConfigDirectory = Split-Path -Parent $SupervisorConfig
+    foreach ($pathProperty in @(
+        "optimizer-launcher-dll", "optimizer-working-directory", "optimizer-config",
+        "lean-launcher-dll", "lean-working-directory", "lean-base-config",
+        "paper-config-overlay", "alpaca-plugin-directory", "output-directory", "kill-switch-file"
+    )) {
+        $configuredPath = $sessionSettings.PSObject.Properties[$pathProperty].Value
+        if (-not [string]::IsNullOrWhiteSpace($configuredPath) -and -not [IO.Path]::IsPathRooted($configuredPath)) {
+            $sessionSettings.PSObject.Properties[$pathProperty].Value = [IO.Path]::GetFullPath((Join-Path $supervisorConfigDirectory $configuredPath))
+        }
+    }
+    $sessionSettings.'paper-session-duration-hours' = $SessionDurationHours
+    $sessionSettings.'paper-session-capital-limit' = $PaperCapitalLimit
+    $sessionSettings.'reoptimization-interval-hours' = 24
+    $temporarySupervisorConfig = Join-Path ([IO.Path]::GetTempPath()) ("algory-supervisor-{0}.json" -f [guid]::NewGuid().ToString("N"))
+    [IO.File]::WriteAllText($temporarySupervisorConfig, ($sessionSettings | ConvertTo-Json -Depth 20))
+    $effectiveSupervisorConfig = $temporarySupervisorConfig
 }
 $userDotnetRoot = Join-Path $env:USERPROFILE ".dotnet"
 $userDotnet = Join-Path $userDotnetRoot "dotnet.exe"
@@ -72,7 +104,7 @@ try {
         --project (Join-Path $repositoryRoot "StrategyDiscovery.Supervisor/QuantConnect.Genetic.Supervisor.csproj") `
         --configuration Release `
         --no-build `
-        -- --config (Resolve-Path -LiteralPath $SupervisorConfig).Path --enable-paper
+        -- --config $effectiveSupervisorConfig --enable-paper
     $exitCode = $LASTEXITCODE
 }
 finally {
@@ -83,6 +115,9 @@ finally {
     if ($null -ne $keySecure) { $keySecure.Dispose() }
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
     $storedCredentials = $null
+    if ($null -ne $temporarySupervisorConfig -and (Test-Path -LiteralPath $temporarySupervisorConfig)) {
+        Remove-Item -LiteralPath $temporarySupervisorConfig -Force
+    }
     [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $previousDotnetRoot, "Process")
     [Environment]::SetEnvironmentVariable("PATH", $previousPath, "Process")
     [Environment]::SetEnvironmentVariable("PSModulePath", $previousPSModulePath, "Process")

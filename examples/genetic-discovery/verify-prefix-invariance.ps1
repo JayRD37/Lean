@@ -1,14 +1,15 @@
 param(
     [string] $LeanRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string] $OutputRoot = (Join-Path $env:TEMP 'lean-prefix-invariance'),
-    [string] $DotnetPath = 'G:\DevTools\LeanSDK\dotnet\dotnet.exe'
+    [string] $DotnetPath = 'G:\DevTools\LeanSDK\dotnet\dotnet.exe',
+    [string] $BaseConfigPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'Launcher\config.json')
 )
 
 $ErrorActionPreference = 'Stop'
 $launcherDir = Join-Path $LeanRoot 'Launcher\bin\Debug'
 $launcher = Join-Path $launcherDir 'QuantConnect.Lean.Launcher.dll'
 $algorithm = Join-Path $launcherDir 'QuantConnect.Algorithm.CSharp.dll'
-$baseConfig = Join-Path $LeanRoot 'Launcher\config.json'
+$baseConfig = [IO.Path]::GetFullPath($BaseConfigPath)
 $dataDir = Join-Path $LeanRoot 'Data'
 if (-not (Test-Path -LiteralPath $DotnetPath)) { $DotnetPath = (Get-Command dotnet -ErrorAction Stop).Source }
 $dotnet = $DotnetPath
