@@ -17,10 +17,14 @@ public static class PaperConfigFactory
         string alpacaPluginDirectory,
         string killSwitchPath,
         string alpacaApiKey,
-        string alpacaApiSecret)
+        string alpacaApiSecret,
+        string quantConnectUserId,
+        string quantConnectApiToken)
     {
         if (string.IsNullOrWhiteSpace(alpacaApiKey) || string.IsNullOrWhiteSpace(alpacaApiSecret))
             throw new InvalidOperationException("Alpaca paper API key and secret must be supplied via environment variables.");
+        if (string.IsNullOrWhiteSpace(quantConnectUserId) || string.IsNullOrWhiteSpace(quantConnectApiToken))
+            throw new InvalidOperationException("QuantConnect user ID and API token are required by the official Alpaca brokerage subscription validator.");
         if (string.IsNullOrWhiteSpace(algorithmTypeName)) throw new ArgumentException("An algorithm type name is required.", nameof(algorithmTypeName));
         if (!Directory.Exists(alpacaPluginDirectory) ||
             !File.Exists(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll")) ||
@@ -39,6 +43,8 @@ public static class PaperConfigFactory
         config["alpaca-api-key"] = alpacaApiKey;
         config["alpaca-api-secret"] = alpacaApiSecret;
         config["alpaca-paper-trading"] = true;
+        config["job-user-id"] = quantConnectUserId;
+        config["api-access-token"] = quantConnectApiToken;
 
         var environment = config["environments"]?["live-alpaca"] as JObject
             ?? throw new InvalidDataException("The live-alpaca environment is missing from the merged LEAN config.");

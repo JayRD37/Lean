@@ -22,6 +22,10 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         var apiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
         if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(apiSecret))
             throw new InvalidOperationException("Set ALGORY_ALPACA_API_KEY and ALGORY_ALPACA_API_SECRET before starting paper trading.");
+        var quantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var quantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
+        if (string.IsNullOrWhiteSpace(quantConnectUserId) || string.IsNullOrWhiteSpace(quantConnectApiToken))
+            throw new InvalidOperationException("Set ALGORY_QUANTCONNECT_USER_ID and ALGORY_QUANTCONNECT_API_TOKEN before starting the Alpaca paper integration. LEAN's official Alpaca plugin uses these credentials to validate its subscription entitlement.");
 
         Directory.CreateDirectory(settings.OutputDirectory);
         using var instanceLock = SupervisorInstanceLock.Acquire(settings.OutputDirectory);
@@ -62,7 +66,8 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 {
                     var next = await OptimizeAndSelectAsync(cancellationToken).ConfigureAwait(false);
                     activeStrategy = next;
-                    active = StartPaper(next, apiKey, apiSecret);
+                    if (!await PaperStartAllowedAsync("initial paper start after optimization").ConfigureAwait(false)) return;
+                    active = StartPaper(next, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
                     continue;
                 }
 
@@ -121,7 +126,8 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                         await Task.Delay(restartDelay, cancellationToken).ConfigureAwait(false);
                         if (activeStrategy is not null)
                         {
-                            active = StartPaper(activeStrategy, apiKey, apiSecret);
+                            if (!await PaperStartAllowedAsync("paper restart after backoff").ConfigureAwait(false)) return;
+                            active = StartPaper(activeStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
                             continue;
                         }
                     }
@@ -190,8 +196,9 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                     await AuditAsync("paper_process_exited_during_optimization", new { unexpectedExitCode }).ConfigureAwait(false);
                     var restartDelay = _restartPolicy.RegisterExit(unexpectedExitCode, uptime);
                     if (restartDelay > TimeSpan.Zero) await Task.Delay(restartDelay, cancellationToken).ConfigureAwait(false);
+                    if (!await PaperStartAllowedAsync("paper restart after optimization").ConfigureAwait(false)) return;
                     activeStrategy = nextStrategy;
-                    active = StartPaper(nextStrategy, apiKey, apiSecret);
+                    active = StartPaper(nextStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
                     continue;
                 }
 
@@ -217,8 +224,9 @@ public sealed class SupervisorHost(SupervisorSettings settings)
                 if (!stoppedCleanly) return;
                 if (cancellationToken.IsCancellationRequested) return;
                 DeleteOwnedKillSwitch();
+                if (!await PaperStartAllowedAsync("scheduled strategy promotion").ConfigureAwait(false)) return;
                 activeStrategy = nextStrategy;
-                active = StartPaper(nextStrategy, apiKey, apiSecret);
+                active = StartPaper(nextStrategy, apiKey, apiSecret, quantConnectUserId, quantConnectApiToken);
             }
         }
         finally
@@ -302,7 +310,7 @@ public sealed class SupervisorHost(SupervisorSettings settings)
         return selected;
     }
 
-    private PaperSession StartPaper(PromotedStrategy strategy, string apiKey, string apiSecret)
+    private PaperSession StartPaper(PromotedStrategy strategy, string apiKey, string apiSecret, string quantConnectUserId, string quantConnectApiToken)
     {
         EnsurePortfolioDrawdownNotTripped();
         if (File.Exists(settings.KillSwitchFile)) throw new InvalidOperationException("Cannot start a paper process while the emergency stop file exists.");
@@ -322,7 +330,9 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             settings.AlpacaPluginDirectory,
             settings.KillSwitchFile,
             apiKey,
-            apiSecret);
+            apiSecret,
+            quantConnectUserId,
+            quantConnectApiToken);
         var configPath = PaperConfigFactory.WriteEphemeralConfig(config);
         Process? process = null;
         try
@@ -359,6 +369,13 @@ public sealed class SupervisorHost(SupervisorSettings settings)
             PaperConfigFactory.DeleteEphemeralConfig(configPath);
             throw;
         }
+    }
+
+    private async Task<bool> PaperStartAllowedAsync(string reason)
+    {
+        if (!File.Exists(settings.KillSwitchFile)) return true;
+        await AuditAsync("paper_start_blocked_by_emergency_stop", new { reason }).ConfigureAwait(false);
+        return false;
     }
 
     private void EnsurePortfolioDrawdownNotTripped()

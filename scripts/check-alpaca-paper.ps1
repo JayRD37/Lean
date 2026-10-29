@@ -2,6 +2,8 @@
 param()
 
 $ErrorActionPreference = "Stop"
+$previousPSModulePath = [Environment]::GetEnvironmentVariable("PSModulePath", "Process")
+$env:PSModulePath = Join-Path $PSHOME "Modules"
 $keySecure = $null
 $secretSecure = $null
 $keyPointer = [IntPtr]::Zero
@@ -70,6 +72,7 @@ finally {
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
     $storedCredentials = $null
     if ($null -ne $headers) { $headers.Clear() }
+    [Environment]::SetEnvironmentVariable("PSModulePath", $previousPSModulePath, "Process")
 }
 
 

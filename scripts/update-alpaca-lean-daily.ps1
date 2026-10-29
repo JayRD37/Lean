@@ -9,6 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$previousPSModulePath = [Environment]::GetEnvironmentVariable("PSModulePath", "Process")
+$env:PSModulePath = Join-Path $PSHOME "Modules"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
@@ -166,5 +168,6 @@ finally {
     if ($null -ne $keySecure) { $keySecure.Dispose() }
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
     $storedCredentials = $null
+    [Environment]::SetEnvironmentVariable("PSModulePath", $previousPSModulePath, "Process")
 }
 

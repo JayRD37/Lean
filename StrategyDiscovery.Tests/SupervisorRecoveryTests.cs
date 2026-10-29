@@ -28,6 +28,8 @@ public class SupervisorRecoveryTests
         startInfo.ArgumentList.Add(Path.Combine(Path.GetTempPath(), $"missing-supervisor-{Guid.NewGuid():N}.json"));
         startInfo.Environment.Remove("ALGORY_ALPACA_API_KEY");
         startInfo.Environment.Remove("ALGORY_ALPACA_API_SECRET");
+        startInfo.Environment.Remove("ALGORY_QUANTCONNECT_USER_ID");
+        startInfo.Environment.Remove("ALGORY_QUANTCONNECT_API_TOKEN");
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Unable to start the supervisor CLI authorization test.");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
@@ -117,10 +119,14 @@ public class SupervisorRecoveryTests
 
         var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
         var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var previousQuantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var previousQuantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
         try
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "recovery-test-key");
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "recovery-test-secret");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", "test-user-id");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", "test-api-token");
             var settings = new SupervisorSettings
             {
                 OutputDirectory = folder,
@@ -136,6 +142,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", previousQuantConnectUserId);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", previousQuantConnectApiToken);
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         }
     }
@@ -147,6 +155,8 @@ public class SupervisorRecoveryTests
         Directory.CreateDirectory(folder);
         var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
         var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var previousQuantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var previousQuantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
         Process? orphanedChild = null;
         try
         {
@@ -181,6 +191,8 @@ public class SupervisorRecoveryTests
 
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "recovery-test-key");
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "recovery-test-secret");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", "test-user-id");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", "test-api-token");
             var settings = new SupervisorSettings
             {
                 OutputDirectory = folder,
@@ -196,6 +208,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", previousQuantConnectUserId);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", previousQuantConnectApiToken);
             if (orphanedChild is not null)
             {
                 try
@@ -217,6 +231,8 @@ public class SupervisorRecoveryTests
         Directory.CreateDirectory(folder);
         var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
         var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var previousQuantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var previousQuantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
         Process? adoptedChild = null;
         string? configPath = null;
         try
@@ -294,6 +310,8 @@ public class SupervisorRecoveryTests
 
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "recovery-test-key");
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "recovery-test-secret");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", "test-user-id");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", "test-api-token");
             var settings = new SupervisorSettings
             {
                 OutputDirectory = folder,
@@ -334,6 +352,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", previousQuantConnectUserId);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", previousQuantConnectApiToken);
             if (adoptedChild is not null)
             {
                 try
@@ -410,6 +430,8 @@ public class SupervisorRecoveryTests
 
         var previousApiKey = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_KEY");
         var previousApiSecret = Environment.GetEnvironmentVariable("ALGORY_ALPACA_API_SECRET");
+        var previousQuantConnectUserId = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID");
+        var previousQuantConnectApiToken = Environment.GetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN");
         var dotnetHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         var settings = new SupervisorSettings
         {
@@ -441,6 +463,8 @@ public class SupervisorRecoveryTests
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", "restart-test-paper-key");
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", "restart-test-paper-secret");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", "test-user-id");
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", "test-api-token");
             var host = new SupervisorHost(settings);
             run = host.RunAsync(cancellation.Token);
 
@@ -465,6 +489,10 @@ public class SupervisorRecoveryTests
 
             var audit = Path.Combine(outputDirectory, "supervisor-audit.jsonl");
             Assert.That(await WaitForFileContentAsync(audit, "paper_process_restart_scheduled", TimeSpan.FromSeconds(5)), Is.True);
+            secondChildProcess.Kill(entireProcessTree: true);
+            await secondChildProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.That(await WaitForFileContentAsync(audit, "\"consecutiveFailures\":2", TimeSpan.FromSeconds(5)), Is.True,
+                "The supervisor did not schedule the second restart after the second paper child exited.");
             File.WriteAllText(settings.KillSwitchFile, "operator-requested paper stop");
             await run.WaitAsync(TimeSpan.FromSeconds(15));
 
@@ -474,13 +502,14 @@ public class SupervisorRecoveryTests
             var events = File.ReadAllLines(statePath);
             Assert.That(events.Count(line => line.StartsWith("optimizer|", StringComparison.Ordinal)), Is.EqualTo(1));
             Assert.That(events.Count(line => line.StartsWith("paper|", StringComparison.Ordinal)), Is.EqualTo(2));
-            Assert.That(File.ReadAllText(audit), Does.Contain("external_emergency_stop_detected"));
-            Assert.That(File.ReadAllText(audit), Does.Contain("paper_shutdown_timeout_force_terminated"));
+            Assert.That(File.ReadAllText(audit), Does.Contain("paper_start_blocked_by_emergency_stop"));
         }
         finally
         {
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_KEY", previousApiKey);
             Environment.SetEnvironmentVariable("ALGORY_ALPACA_API_SECRET", previousApiSecret);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_USER_ID", previousQuantConnectUserId);
+            Environment.SetEnvironmentVariable("ALGORY_QUANTCONNECT_API_TOKEN", previousQuantConnectApiToken);
             if (run is not null && !run.IsCompleted)
             {
                 File.WriteAllText(settings.KillSwitchFile, "test cleanup");

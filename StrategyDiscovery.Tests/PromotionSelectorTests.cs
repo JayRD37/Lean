@@ -157,11 +157,13 @@ public class PromotionSelectorTests
             };
             var selected = new PromotedStrategy(genome, 0.5, StrategyPopulation.Consistency, 3);
 
-            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret");
+            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret", "qc-user-id", "qc-api-token");
 
             Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca"));
             Assert.That(config["alpaca-paper-trading"]?.Value<bool>(), Is.True);
             Assert.That(config["alpaca-api-key"]?.Value<string>(), Is.EqualTo("paper-key"));
+            Assert.That(config["job-user-id"]?.Value<string>(), Is.EqualTo("qc-user-id"));
+            Assert.That(config["api-access-token"]?.Value<string>(), Is.EqualTo("qc-api-token"));
             Assert.That(config["results-destination-folder"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(resultsDirectory)));
             Assert.That(config["log-handler"]?.Value<string>(), Is.EqualTo("QuantConnect.Logging.FileLogHandler"));
             Assert.That(config["plugin-directory"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(alpacaPluginDirectory)));
@@ -176,7 +178,7 @@ public class PromotionSelectorTests
             File.Delete(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"));
             Assert.Throws<InvalidDataException>(() => PaperConfigFactory.Create(
                 basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory,
-                alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret"));
+                alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret", "qc-user-id", "qc-api-token"));
         }
         finally
         {
@@ -190,7 +192,7 @@ public class PromotionSelectorTests
         Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
             "missing-base.json", "missing-overlay.json", "GeneticDiscoveryAlgorithm",
             new PromotedStrategy(Genome(10, 40, 12, 4, 3, 30).ToObject<StrategyGenome>()!, 0.5, StrategyPopulation.Growth, 1),
-            "results", "missing-plugin", "stop", string.Empty, string.Empty));
+            "results", "missing-plugin", "stop", string.Empty, string.Empty, "qc-user-id", "qc-api-token"));
     }
 
     [Test]
