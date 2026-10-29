@@ -6,10 +6,10 @@ public static class PaperExecutionAuthorization
     {
         if (!liveMode) return;
         if (!explicitPaperOptIn || !alpacaPaperMode ||
-            !string.Equals(configuredBrokerage, "AlpacaBrokerage", StringComparison.Ordinal))
+            !string.Equals(configuredBrokerage, "AlpacaDirectBrokerage", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "Live execution is disabled. Live mode requires explicit strategy paper opt-in, alpaca-paper-trading=true, and the AlpacaBrokerage adapter.");
+                "Live execution is disabled. Paper mode requires explicit strategy opt-in, alpaca-paper-trading=true, and the paper-only AlpacaDirectBrokerage adapter.");
         }
     }
 }

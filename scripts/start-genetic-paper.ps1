@@ -31,19 +31,13 @@ else {
 
 $keyVariable = "ALGORY_ALPACA_API_KEY"
 $secretVariable = "ALGORY_ALPACA_API_SECRET"
-$quantConnectUserVariable = "ALGORY_QUANTCONNECT_USER_ID"
-$quantConnectTokenVariable = "ALGORY_QUANTCONNECT_API_TOKEN"
 $previousKey = [Environment]::GetEnvironmentVariable($keyVariable, "Process")
 $previousSecret = [Environment]::GetEnvironmentVariable($secretVariable, "Process")
-$previousQuantConnectUserId = [Environment]::GetEnvironmentVariable($quantConnectUserVariable, "Process")
-$previousQuantConnectToken = [Environment]::GetEnvironmentVariable($quantConnectTokenVariable, "Process")
 $keySecure = $null
 $secretSecure = $null
-$quantConnectTokenSecure = $null
 $storedCredentials = $null
 $keyPointer = [IntPtr]::Zero
 $secretPointer = [IntPtr]::Zero
-$quantConnectTokenPointer = [IntPtr]::Zero
 $exitCode = 1
 $credentialFile = Join-Path $env:LOCALAPPDATA "AlgoryLean/alpaca-paper.credentials.json.dpapi"
 
@@ -69,18 +63,6 @@ try {
         throw "Both paper credentials are required."
     }
 
-    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($quantConnectUserVariable, "Process"))) {
-        $quantConnectUserId = Read-Host "QuantConnect user ID (required by the official Alpaca plugin)"
-        if ([string]::IsNullOrWhiteSpace($quantConnectUserId)) { throw "A QuantConnect user ID is required to validate the Alpaca integration entitlement." }
-        [Environment]::SetEnvironmentVariable($quantConnectUserVariable, $quantConnectUserId, "Process")
-    }
-    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($quantConnectTokenVariable, "Process"))) {
-        $quantConnectTokenSecure = Read-Host "QuantConnect API token (input hidden)" -AsSecureString
-        if ($quantConnectTokenSecure.Length -eq 0) { throw "A QuantConnect API token is required to validate the Alpaca integration entitlement." }
-        $quantConnectTokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($quantConnectTokenSecure)
-        [Environment]::SetEnvironmentVariable($quantConnectTokenVariable, [Runtime.InteropServices.Marshal]::PtrToStringBSTR($quantConnectTokenPointer), "Process")
-    }
-
     $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($keySecure)
     $secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secretSecure)
     [Environment]::SetEnvironmentVariable($keyVariable, [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer), "Process")
@@ -96,14 +78,10 @@ try {
 finally {
     [Environment]::SetEnvironmentVariable($keyVariable, $previousKey, "Process")
     [Environment]::SetEnvironmentVariable($secretVariable, $previousSecret, "Process")
-    [Environment]::SetEnvironmentVariable($quantConnectUserVariable, $previousQuantConnectUserId, "Process")
-    [Environment]::SetEnvironmentVariable($quantConnectTokenVariable, $previousQuantConnectToken, "Process")
     if ($keyPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer) }
     if ($secretPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer) }
-    if ($quantConnectTokenPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($quantConnectTokenPointer) }
     if ($null -ne $keySecure) { $keySecure.Dispose() }
     if ($null -ne $secretSecure) { $secretSecure.Dispose() }
-    if ($null -ne $quantConnectTokenSecure) { $quantConnectTokenSecure.Dispose() }
     $storedCredentials = $null
     [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $previousDotnetRoot, "Process")
     [Environment]::SetEnvironmentVariable("PATH", $previousPath, "Process")

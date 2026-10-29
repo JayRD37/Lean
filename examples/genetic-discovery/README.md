@@ -24,9 +24,11 @@ LEAN's optimizer bounds concurrent backtests with `maximum-concurrent-backtests`
 
 ## Paper deployment
 
-Paper execution is a separate step. Build and stage the pinned Alpaca LEAN plugin with `scripts/setup-alpaca-plugin.ps1`. In the Alpaca dashboard, select **Paper Trading** (the dashboard should say no real money is being used), then scroll to **API Keys Endpoint** and choose **Generate New Keys**. Save the paper key and secret privately; never paste them into chat or commit them.
+Paper execution is a separate step. In the Alpaca dashboard, select **Paper Trading** (the dashboard should say no real money is being used), then scroll to **API Keys Endpoint** and choose **Generate New Keys**. Save the paper key and secret privately; never paste them into chat or commit them. The integrated adapter calls Alpaca's paper endpoint and requires a paper key beginning with `PK`.
 
-The official LEAN Alpaca plugin also requires a QuantConnect user ID and API token to validate its Alpaca integration entitlement. To request them, sign in to QuantConnect, open **My Account**, and under **Security** choose **Request Email With Token and Your User-Id for API Requests** ([official API authentication instructions](https://www.quantconnect.com/docs/v2/cloud-platform/api-reference/authentication)). `start-genetic-paper.ps1` prompts for these separately (the token prompt is hidden) unless they are already present in `ALGORY_QUANTCONNECT_USER_ID` and `ALGORY_QUANTCONNECT_API_TOKEN`. This is separate from Alpaca account authentication; a valid QuantConnect product entitlement is required. The token is passed only to the supervisor and its restricted, temporary LEAN config, then removed from the launching process environment when the supervisor exits. If LEAN reports an invalid user ID or token, verify that the pair came from the same QuantConnect account and request a fresh token before retrying. In the 2026-10-28 local check, API authentication succeeded but the plugin returned `Your subscription is not valid`; no Alpaca paper orders were submitted. A QuantConnect account and API token alone are not sufficient for this plugin. See [QuantConnect's Alpaca integration documentation](https://www.quantconnect.com/docs/v2/cloud-platform/live-trading/brokerages/alpaca) and [official plugin source](https://github.com/QuantConnect/Lean.Brokerages.Alpaca/blob/master/QuantConnect.AlpacaBrokerage/AlpacaBrokerage.cs).
+The direct adapter no longer uses the subscription-validated QuantConnect Alpaca plugin, so QuantConnect credentials are not needed for the broker connection. `start-genetic-paper.ps1` reads Alpaca credentials from the Windows DPAPI-protected file or prompts with hidden input. It passes them to the supervisor, which writes them only to a temporary LEAN config with current-user-only access. The supervisor removes them from the LEAN child's inherited environment.
+
+`Brokerages.AlpacaDirect` now registers as a LEAN brokerage and live market-data queue. It supports US equity market, limit, stop, and stop-limit orders, trade-update events, IEX trade/minute-bar streaming, and account/position reads. It has no live endpoint. The saved account returned `ACTIVE` and unblocked; its IEX market-data stream authenticated successfully without submitting orders. Historical warmup, reconnect recovery, brokerage startup, and an end-to-end paper session still need validation before unattended operation.
 
 Start the local supervisor from the repository root:
 
@@ -41,6 +43,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\check-alpaca-paper.ps1
 ```
 
 It calls only Alpaca's paper `/v2/account` endpoint and submits no orders. If no protected credential file exists, it prompts for the key and secret with hidden input.
+
+To authenticate the paper IEX WebSocket without placing an order, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\check-alpaca-stream.ps1
+```
+
+This authenticates both LEAN's paper brokerage and `AlpacaDirectDataQueueHandler`, then disconnects without submitting an order. Credentials stay out of the console output.
 
 The script reads Alpaca credentials from a Windows DPAPI-protected file scoped to your Windows account, or prompts with hidden input when the file is absent. It passes them to the supervisor process and requires the explicit `--enable-paper` flag. The supervisor has no live-money mode. The encrypted file cannot be decrypted from another Windows account or machine. Before running, review `supervisor.json` and `paper-config.overlay.json`.
 

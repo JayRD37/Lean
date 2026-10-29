@@ -1,12 +1,12 @@
 {
-  "alpaca-api-key": "<set-through-your-secret-manager>",
-  "alpaca-api-secret": "<set-through-your-secret-manager>",
+  "alpaca-direct-api-key": "<set-through-your-secret-manager>",
+  "alpaca-direct-api-secret": "<set-through-your-secret-manager>",
   "alpaca-paper-trading": true,
   "environments": {
-    "live-alpaca": {
+    "live-alpaca-direct": {
       "live-mode": true,
-      "live-mode-brokerage": "AlpacaBrokerage",
-      "data-queue-handler": [ "AlpacaBrokerage" ],
+      "live-mode-brokerage": "AlpacaDirectBrokerage",
+      "data-queue-handler": [ "AlpacaDirectDataQueueHandler" ],
       "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
       "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
       "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",

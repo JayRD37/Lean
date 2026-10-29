@@ -144,29 +144,23 @@ public class PromotionSelectorTests
             var basePath = Path.Combine(directory, "base.json");
             var overlayPath = Path.Combine(directory, "overlay.json");
             File.WriteAllText(basePath, "{\"environment\":\"backtesting\",\"algorithm-type-name\":\"Basic\",\"environments\":{}}");
-            File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
+            File.WriteAllText(overlayPath, "{\"alpaca-paper-trading\":true,\"environments\":{\"live-alpaca-direct\":{\"live-mode\":true,\"live-mode-brokerage\":\"AlpacaDirectBrokerage\"}},\"parameters\":{\"discovery.max-positions\":\"3\",\"discovery.max-exposure-percent\":\"30\"}}");
             var resultsDirectory = Path.Combine(directory, "paper-results");
             Directory.CreateDirectory(resultsDirectory);
-            var alpacaPluginDirectory = Path.Combine(directory, "alpaca-plugin");
-            Directory.CreateDirectory(alpacaPluginDirectory);
-            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
-            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"), string.Empty);
             var genome = new StrategyGenome(StrategyFamily.MeanReversion, StrategyTimeframe.Hour, 9, 35, 14, 3, 2, 25)
             {
                 ConfirmationTimeframe = StrategyTimeframe.Daily
             };
             var selected = new PromotedStrategy(genome, 0.5, StrategyPopulation.Consistency, 3);
 
-            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret", "qc-user-id", "qc-api-token");
+            var config = PaperConfigFactory.Create(basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory, Path.Combine(directory, "stop"), "PK-paper-key", "paper-secret");
 
-            Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca"));
+            Assert.That(config["environment"]?.Value<string>(), Is.EqualTo("live-alpaca-direct"));
             Assert.That(config["alpaca-paper-trading"]?.Value<bool>(), Is.True);
-            Assert.That(config["alpaca-api-key"]?.Value<string>(), Is.EqualTo("paper-key"));
-            Assert.That(config["job-user-id"]?.Value<string>(), Is.EqualTo("qc-user-id"));
-            Assert.That(config["api-access-token"]?.Value<string>(), Is.EqualTo("qc-api-token"));
+            Assert.That(config["alpaca-direct-api-key"]?.Value<string>(), Is.EqualTo("PK-paper-key"));
+            Assert.That(config["alpaca-direct-api-secret"]?.Value<string>(), Is.EqualTo("paper-secret"));
             Assert.That(config["results-destination-folder"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(resultsDirectory)));
             Assert.That(config["log-handler"]?.Value<string>(), Is.EqualTo("QuantConnect.Logging.FileLogHandler"));
-            Assert.That(config["plugin-directory"]?.Value<string>(), Is.EqualTo(Path.GetFullPath(alpacaPluginDirectory)));
             Assert.That(config["parameters"]?["discovery.allow-paper-trading"]?.Value<string>(), Is.EqualTo("true"));
             Assert.That(config["parameters"]?["discovery.family"]?.Value<string>(), Is.EqualTo("MeanReversion"));
             Assert.That(config["parameters"]?["discovery.timeframe"]?.Value<string>(), Is.EqualTo("Hour"));
@@ -175,10 +169,9 @@ public class PromotionSelectorTests
             Assert.That(config["parameters"]?["discovery.drawdown-state-file"]?.Value<string>(),
                 Is.EqualTo(Path.Combine(directory, "portfolio-drawdown-state.json")));
 
-            File.Delete(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"));
-            Assert.Throws<InvalidDataException>(() => PaperConfigFactory.Create(
+            Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
                 basePath, overlayPath, "GeneticDiscoveryAlgorithm", selected, resultsDirectory,
-                alpacaPluginDirectory, Path.Combine(directory, "stop"), "paper-key", "paper-secret", "qc-user-id", "qc-api-token"));
+                Path.Combine(directory, "stop"), "bad-live-key", "paper-secret"));
         }
         finally
         {
@@ -192,7 +185,7 @@ public class PromotionSelectorTests
         Assert.Throws<InvalidOperationException>(() => PaperConfigFactory.Create(
             "missing-base.json", "missing-overlay.json", "GeneticDiscoveryAlgorithm",
             new PromotedStrategy(Genome(10, 40, 12, 4, 3, 30).ToObject<StrategyGenome>()!, 0.5, StrategyPopulation.Growth, 1),
-            "results", "missing-plugin", "stop", string.Empty, string.Empty, "qc-user-id", "qc-api-token"));
+            "results", "stop", string.Empty, string.Empty));
     }
 
     [Test]
@@ -203,10 +196,6 @@ public class PromotionSelectorTests
         var leanDirectory = Path.Combine(directory, "lean");
         Directory.CreateDirectory(optimizerDirectory);
         Directory.CreateDirectory(leanDirectory);
-        var alpacaPluginDirectory = Path.Combine(directory, "alpaca-plugin");
-        Directory.CreateDirectory(alpacaPluginDirectory);
-        File.WriteAllText(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
-        File.WriteAllText(Path.Combine(alpacaPluginDirectory, "Alpaca.Markets.dll"), string.Empty);
         try
         {
             File.WriteAllText(Path.Combine(optimizerDirectory, "launcher.dll"), string.Empty);
@@ -222,10 +211,6 @@ public class PromotionSelectorTests
             Assert.That(settings.MaximumPaperExposurePercent, Is.EqualTo(30));
             Assert.That(settings.RequiredValidationWindowCount, Is.EqualTo(3));
             Assert.That(settings.RankingsFile, Is.EqualTo(Path.Combine(optimizerDirectory, "results", "genetic-search-rankings.json")));
-
-            File.Delete(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"));
-            Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
-            File.WriteAllText(Path.Combine(alpacaPluginDirectory, "QuantConnect.Brokerages.Alpaca.dll"), string.Empty);
 
             File.WriteAllText(Path.Combine(optimizerDirectory, "optimizer.json"), OptimizerConfig().Replace("SPY,QQQ,IWM", "SPY,QQQ", StringComparison.Ordinal));
             Assert.Throws<InvalidDataException>(() => SupervisorSettings.Load(settingsPath));
@@ -280,7 +265,6 @@ public class PromotionSelectorTests
           "lean-working-directory": "lean",
           "lean-base-config": "base.json",
           "paper-config-overlay": "overlay.json",
-          "alpaca-plugin-directory": "alpaca-plugin",
           "output-directory": "output",
           "kill-switch-file": "stop",
           "maximum-validation-drawdown": 0.08

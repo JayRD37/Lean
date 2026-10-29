@@ -19,6 +19,7 @@
     <ProjectReference Include="..\StrategyDiscovery.Tests.ProcessFixture\QuantConnect.Genetic.ProcessFixture.csproj" />
     <ProjectReference Include="..\Engine\QuantConnect.Lean.Engine.csproj" />
     <ProjectReference Include="..\Brokerages\QuantConnect.Brokerages.csproj" />
+    <ProjectReference Include="..\Brokerages.AlpacaDirect\QuantConnect.AlpacaDirect.csproj" />
     <ProjectReference Include="..\Algorithm\QuantConnect.Algorithm.csproj" />
     <ProjectReference Include="..\Algorithm.CSharp\QuantConnect.Algorithm.CSharp.csproj" />
   </ItemGroup>

@@ -7,7 +7,6 @@
   "lean-working-directory": "../../Launcher/bin/Debug",
   "lean-base-config": "../../Launcher/config.json",
   "paper-config-overlay": "paper-config.overlay.json",
-  "alpaca-plugin-directory": "../../plugins/alpaca",
   "output-directory": "../../supervisor-output",
   "kill-switch-file": "../../Launcher/bin/Debug/emergency-stop",
   "reoptimization-interval-hours": 168,

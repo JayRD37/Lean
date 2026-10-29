@@ -285,11 +285,12 @@ public class GeneticSearchEngineTests
     public void LiveExecutionRequiresExplicitAlpacaPaperAuthorization()
     {
         Assert.DoesNotThrow(() => PaperExecutionAuthorization.Validate(false, false, false, "InteractiveBrokersBrokerage"));
-        Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, false, true, "AlpacaBrokerage"));
-        Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, true, false, "AlpacaBrokerage"));
+        Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, false, true, "AlpacaDirectBrokerage"));
+        Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, true, false, "AlpacaDirectBrokerage"));
         Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, true, true, "InteractiveBrokersBrokerage"));
+        Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, true, true, "AlpacaBrokerage"));
         Assert.Throws<InvalidOperationException>(() => PaperExecutionAuthorization.Validate(true, true, true, string.Empty));
-        Assert.DoesNotThrow(() => PaperExecutionAuthorization.Validate(true, true, true, "AlpacaBrokerage"));
+        Assert.DoesNotThrow(() => PaperExecutionAuthorization.Validate(true, true, true, "AlpacaDirectBrokerage"));
     }
 
     [Test]
