@@ -28,7 +28,7 @@ Paper execution is a separate step. In the Alpaca dashboard, select **Paper Trad
 
 The direct adapter no longer uses the subscription-validated QuantConnect Alpaca plugin, so QuantConnect credentials are not needed for the broker connection. `start-genetic-paper.ps1` reads Alpaca credentials from the Windows DPAPI-protected file or prompts with hidden input. It passes them to the supervisor, which writes them only to a temporary LEAN config with current-user-only access. The supervisor removes them from the LEAN child's inherited environment.
 
-`Brokerages.AlpacaDirect` now registers as a LEAN brokerage and live market-data queue. It supports US equity market, limit, stop, and stop-limit orders, trade-update events, IEX trade/minute-bar streaming, and account/position reads. It has no live endpoint. The saved account returned `ACTIVE` and unblocked; its IEX market-data stream authenticated successfully without submitting orders. Historical warmup, reconnect recovery, brokerage startup, and an end-to-end paper session still need validation before unattended operation.
+`Brokerages.AlpacaDirect` registers as a LEAN brokerage and live market-data queue. It supports US equity market, limit, stop, and stop-limit orders, trade-update events, IEX trade/minute-bar streaming, and account/position reads. It has no live endpoint. The supervised LEAN paper session connected with an `ACTIVE`, unblocked account and authenticated brokerage and IEX data streams. The session remained running while the market was closed and submitted no orders. Market-hour bar delivery, order execution, and reconnect/restart behavior still need validation.
 
 Start the local supervisor from the repository root:
 
