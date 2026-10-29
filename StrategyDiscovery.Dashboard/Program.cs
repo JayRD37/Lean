@@ -391,4 +391,3 @@ static int ParseInt(string? value) => int.TryParse(value, NumberStyles.Integer, 
 
 sealed record AuditEntry(DateTimeOffset Utc, string Event, JsonNode? Details);
 sealed record ResearchRecord(DateTimeOffset Utc, int Id, int Generation, string Population, string Phase, double Fitness, JsonObject? Genome, JsonObject? Metrics);
-

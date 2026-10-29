@@ -339,4 +339,3 @@ window.addEventListener('hashchange',navigate);
 navigate();
 refreshAll();
 setInterval(refreshAll, 5000);
-
